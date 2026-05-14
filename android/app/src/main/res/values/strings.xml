@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Yusuf Stock</string>
+    <string name="title_activity_main">Yusuf Stock</string>
+    <string name="package_name">com.milancreatives.yusufstock</string>
+    <string name="custom_url_scheme">com.milancreatives.yusufstock</string>
+</resources>
