@@ -939,12 +939,15 @@ function App() {
 
       setProducts((currentProducts) => {
         const productsMap = new Map();
+
         currentProducts.forEach((product) =>
           productsMap.set(product.name.toLowerCase(), product)
         );
+
         importedProducts.forEach((product) =>
           productsMap.set(product.name.toLowerCase(), product)
         );
+
         return Array.from(productsMap.values());
       });
 
@@ -2307,7 +2310,7 @@ function App() {
     <div className="phone-shell">
       {toast && <div className={`toast ${toast.type}`}>{toast.message}</div>}
 
-      <SideMenu />
+      {SideMenu()}
 
       <div className="top-bar">
         <button className="menu-btn" type="button" onClick={() => setMenuOpen(true)}>
@@ -2320,13 +2323,13 @@ function App() {
       </div>
 
       <main className="screen">
-        {activeTab === "dashboard" && <Dashboard />}
-        {activeTab === "products" && <Products />}
-        {activeTab === "productDetail" && <ProductDetail />}
-        {activeTab === "sales" && <Sales />}
-        {activeTab === "orders" && <Orders />}
-        {activeTab === "reports" && <Reports />}
-        {activeTab === "more" && <More />}
+        {activeTab === "dashboard" && Dashboard()}
+        {activeTab === "products" && Products()}
+        {activeTab === "productDetail" && ProductDetail()}
+        {activeTab === "sales" && Sales()}
+        {activeTab === "orders" && Orders()}
+        {activeTab === "reports" && Reports()}
+        {activeTab === "more" && More()}
       </main>
 
       <nav className="bottom-nav">
