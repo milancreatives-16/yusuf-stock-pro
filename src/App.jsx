@@ -88,6 +88,7 @@ function dayOnly(dateKey) {
 function initials(name = "") {
   const parts = String(name).trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
+
   return parts
     .slice(0, 2)
     .map((part) => part[0].toUpperCase())
@@ -129,53 +130,65 @@ function ChoiceGrid({
   emptyText,
   branch = false,
 }) {
+  const [open, setOpen] = useState(false);
   const selected = options.find((item) => item.name === value);
 
   return (
     <div className="choice-panel">
-      <div className="choice-head">
+      <button
+        type="button"
+        className="choice-head choice-toggle"
+        onClick={() => setOpen((current) => !current)}
+      >
         <div>
           <label className="field-label no-margin">{label}</label>
-          <p>{helper}</p>
+          <p>{selected ? selected.name : helper}</p>
         </div>
 
         <span className={selected ? "selected-pill active" : "selected-pill"}>
-          {selected ? selected.name : "Not selected"}
+          {open ? "Hide" : selected ? "Change" : "Choose"}
         </span>
-      </div>
+      </button>
 
-      {options.length === 0 ? (
-        <p className="empty small-empty">{emptyText}</p>
-      ) : (
-        <div className="choice-grid">
-          {options.map((item) => {
-            const active = value === item.name;
+      {open && (
+        <>
+          {options.length === 0 ? (
+            <p className="empty small-empty">{emptyText}</p>
+          ) : (
+            <div className="choice-grid">
+              {options.map((item) => {
+                const active = value === item.name;
 
-            return (
-              <button
-                key={item.id || item.name}
-                type="button"
-                className={active ? "choice-card active" : "choice-card"}
-                onClick={() => onChange(item.name)}
-              >
-                <span className="choice-avatar">
-                  {branch
-                    ? item.shop_number
-                      ? `S${item.shop_number}`
-                      : "🏪"
-                    : initials(item.name)}
-                </span>
+                return (
+                  <button
+                    key={item.id || item.name}
+                    type="button"
+                    className={active ? "choice-card active" : "choice-card"}
+                    onClick={() => {
+                      onChange(item.name);
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="choice-avatar">
+                      {branch
+                        ? item.shop_number
+                          ? `S${item.shop_number}`
+                          : "🏪"
+                        : initials(item.name)}
+                    </span>
 
-                <span className="choice-info">
-                  <strong>{item.name}</strong>
-                  <small>{branch ? "Branch" : "Worker"}</small>
-                </span>
+                    <span className="choice-info">
+                      <strong>{item.name}</strong>
+                      <small>{branch ? "Branch" : "Worker"}</small>
+                    </span>
 
-                <span className="choice-mark">{active ? "✓" : "+"}</span>
-              </button>
-            );
-          })}
-        </div>
+                    <span className="choice-mark">{active ? "✓" : "+"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -382,7 +395,7 @@ function App() {
 
   const scheduleLoad = () => {
     window.clearTimeout(loadTimer.current);
-    loadTimer.current = window.setTimeout(loadData, 650);
+    loadTimer.current = window.setTimeout(loadData, 800);
   };
 
   useEffect(() => {
@@ -1635,7 +1648,7 @@ function App() {
 
       <ChoiceGrid
         label="Sold by"
-        helper="Tap the worker recording this sale."
+        helper="Tap to choose worker"
         value={sale.soldBy}
         options={activeWorkers}
         onChange={(name) => setSale({ ...sale, soldBy: name })}
@@ -1644,7 +1657,7 @@ function App() {
 
       <ChoiceGrid
         label="Shop branch"
-        helper="Tap the branch where this sale happened."
+        helper="Tap to choose branch"
         value={sale.branchName}
         options={activeBranches}
         onChange={(name) => setSale({ ...sale, branchName: name })}
@@ -2249,25 +2262,25 @@ function App() {
   const renderScreen = () => {
     switch (activeTab) {
       case "dashboard":
-        return <Dashboard />;
+        return Dashboard();
       case "products":
-        return <Products />;
+        return Products();
       case "productDetail":
-        return <ProductDetail />;
+        return ProductDetail();
       case "sales":
-        return <Sales />;
+        return Sales();
       case "reports":
-        return <Reports />;
+        return Reports();
       case "orders":
-        return <Orders />;
+        return Orders();
       case "workersAdmin":
-        return <ManageWorkers />;
+        return ManageWorkers();
       case "branchesAdmin":
-        return <ManageBranches />;
+        return ManageBranches();
       case "more":
-        return <More />;
+        return More();
       default:
-        return <Dashboard />;
+        return Dashboard();
     }
   };
 

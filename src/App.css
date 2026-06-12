@@ -891,6 +891,19 @@ select option {
   line-height: 1.4;
 }
 
+.choice-toggle {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  padding: 0;
+  text-align: left;
+}
+
+.choice-toggle:active {
+  transform: none;
+}
+
 .selected-pill {
   border: 1px solid #334155;
   background: #0f172a;
@@ -911,7 +924,6 @@ select option {
   color: #20e3b2;
 }
 
-/* Clean 2-by-2 worker/branch cards */
 .choice-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
