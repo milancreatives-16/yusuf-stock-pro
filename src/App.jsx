@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import { supabase } from "./supabaseClient";
 
@@ -7,31 +7,201 @@ const ADMIN_PIN = "0987";
 const PAYMENT_METHODS = ["Cash", "M-Pesa"];
 const ORDER_STATUSES = ["Pending", "Ready", "Collected", "Cancelled"];
 
+const DEFAULT_WORKERS = ["Dennis", "Benjamin", "Kijana", "Muuo", "Mutavi", "Collins"];
+
+const DEFAULT_BRANCHES = [
+  { shop_number: 1, name: "Gossip Branch", is_active: true },
+  { shop_number: 2, name: "Deliverance Road Branch", is_active: true },
+  { shop_number: 3, name: "3d's Branch", is_active: true },
+  { shop_number: 4, name: "Tuffoam Branch", is_active: true },
+];
+
+const money = (value) => `KSh ${Number(value || 0).toLocaleString()}`;
+
+const num = (value) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const pad = (n) => String(n).padStart(2, "0");
+
+function dateKeyFromDate(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  }
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+const todayKey = () => dateKeyFromDate(new Date());
+
+function parseDateKey(key) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(key))) return null;
+  const [y, m, d] = String(key).split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function normalizeSaleDate(saleDate, createdAt) {
+  if (saleDate && /^\d{4}-\d{2}-\d{2}$/.test(String(saleDate))) {
+    return String(saleDate);
+  }
+
+  const fromSale = saleDate ? new Date(saleDate) : null;
+  if (fromSale && !Number.isNaN(fromSale.getTime())) {
+    return dateKeyFromDate(fromSale);
+  }
+
+  const fromCreated = createdAt ? new Date(createdAt) : null;
+  if (fromCreated && !Number.isNaN(fromCreated.getTime())) {
+    return dateKeyFromDate(fromCreated);
+  }
+
+  return todayKey();
+}
+
+function niceDate(dateKey) {
+  const d = parseDateKey(dateKey);
+  if (!d) return dateKey || "Unknown date";
+
+  return d.toLocaleDateString(undefined, {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function dayOnly(dateKey) {
+  const d = parseDateKey(dateKey);
+  if (!d) return "Day";
+  return d.toLocaleDateString(undefined, { weekday: "long" });
+}
+
+function initials(name = "") {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+}
+
+function categoryType(category = "") {
+  const text = String(category).toLowerCase();
+
+  if (text.includes("charger") || text.includes("adapter")) return "charger";
+  if (text.includes("protector") || text.includes("glass") || text.includes("screen")) return "protector";
+  if (text.includes("earpod") || text.includes("airpod") || text.includes("bud")) return "earpods";
+  if (text.includes("earphone") || text.includes("handsfree") || text.includes("wired")) return "earphones";
+  if (text.includes("headphone") || text.includes("headset")) return "headphones";
+  if (text.includes("cable") || text.includes("usb")) return "cable";
+  if (text.includes("power") || text.includes("bank")) return "powerbank";
+  if (text.includes("cover") || text.includes("case") || text.includes("pouch")) return "cover";
+  if (text.includes("repair") || text.includes("motherboard") || text.includes("flex")) return "repair";
+
+  return "phone";
+}
+
+function CategoryVector({ category }) {
+  return (
+    <div className={`category-vector ${categoryType(category)}`}>
+      <span className="v-one" />
+      <span className="v-two" />
+      <span className="v-three" />
+    </div>
+  );
+}
+
+function ChoiceGrid({
+  label,
+  helper,
+  value,
+  options,
+  onChange,
+  emptyText,
+  branch = false,
+}) {
+  const selected = options.find((item) => item.name === value);
+
+  return (
+    <div className="choice-panel">
+      <div className="choice-head">
+        <div>
+          <label className="field-label no-margin">{label}</label>
+          <p>{helper}</p>
+        </div>
+
+        <span className={selected ? "selected-pill active" : "selected-pill"}>
+          {selected ? selected.name : "Not selected"}
+        </span>
+      </div>
+
+      {options.length === 0 ? (
+        <p className="empty small-empty">{emptyText}</p>
+      ) : (
+        <div className="choice-grid">
+          {options.map((item) => {
+            const active = value === item.name;
+
+            return (
+              <button
+                key={item.id || item.name}
+                type="button"
+                className={active ? "choice-card active" : "choice-card"}
+                onClick={() => onChange(item.name)}
+              >
+                <span className="choice-avatar">
+                  {branch
+                    ? item.shop_number
+                      ? `S${item.shop_number}`
+                      : "🏪"
+                    : initials(item.name)}
+                </span>
+
+                <span className="choice-info">
+                  <strong>{item.name}</strong>
+                  <small>{branch ? "Branch" : "Worker"}</small>
+                </span>
+
+                <span className="choice-mark">{active ? "✓" : "+"}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [lowStockOpen, setLowStockOpen] = useState(false);
-  const [selectedProductName, setSelectedProductName] = useState("");
+  const [isAdmin, setIsAdmin] = useState(
+    () => localStorage.getItem("isAdmin") === "true"
+  );
+  const [pinInput, setPinInput] = useState("");
+  const [toast, setToast] = useState(null);
 
-  const [products, setProducts] = useState(() => {
-    const saved = localStorage.getItem("products");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [products, setProducts] = useState([]);
+  const [sales, setSales] = useState([]);
+  const [workers, setWorkers] = useState([]);
+  const [branches, setBranches] = useState(DEFAULT_BRANCHES);
+  const [orders, setOrders] = useState([]);
 
-  const [sales, setSales] = useState(() => {
-    const saved = localStorage.getItem("sales");
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [workers, setWorkers] = useState(() => {
-    const saved = localStorage.getItem("workers");
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [orders, setOrders] = useState(() => {
-    const saved = localStorage.getItem("orders");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [productSearch, setProductSearch] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [stockSearch, setStockSearch] = useState("");
+  const [expandedReport, setExpandedReport] = useState(todayKey());
+  const [reportBranch, setReportBranch] = useState({});
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
   const [newProduct, setNewProduct] = useState({
     name: "",
@@ -42,12 +212,17 @@ function App() {
   });
 
   const [editProduct, setEditProduct] = useState({
-    originalName: "",
     name: "",
     category: "",
     stock: "",
     buyingPrice: "",
     sellingPrice: "",
+  });
+
+  const [stockUpdate, setStockUpdate] = useState({
+    product: "",
+    mode: "add",
+    quantity: "",
   });
 
   const [sale, setSale] = useState({
@@ -58,8 +233,9 @@ function App() {
     sellingPrice: "",
     serviceName: "",
     serviceNote: "",
-    paymentMethod: "Cash",
     soldBy: "",
+    branchName: "",
+    paymentMethod: "Cash",
   });
 
   const [newOrder, setNewOrder] = useState({
@@ -69,337 +245,376 @@ function App() {
     orderItem: "",
     totalAmount: "",
     depositPaid: "",
-    orderDate: new Date().toISOString().slice(0, 10),
     collectionDate: "",
     status: "Pending",
     handledBy: "",
     notes: "",
   });
 
-  const [productFilterCategory, setProductFilterCategory] = useState("");
-  const [productSearch, setProductSearch] = useState("");
-  const [saleProductSearch, setSaleProductSearch] = useState("");
-  const [stockSearch, setStockSearch] = useState("");
-  const [toast, setToast] = useState(null);
+  const [newWorker, setNewWorker] = useState("");
+  const [editingWorkerId, setEditingWorkerId] = useState("");
+  const [workerEditName, setWorkerEditName] = useState("");
 
-  const [stockUpdate, setStockUpdate] = useState({
-    product: "",
-    mode: "add",
-    quantity: "",
+  const [newBranch, setNewBranch] = useState({
+    shop_number: "",
+    name: "",
   });
 
-  const [newWorker, setNewWorker] = useState("");
-  const [isAdmin, setIsAdmin] = useState(
-    () => localStorage.getItem("isAdmin") === "true"
-  );
-  const [pinInput, setPinInput] = useState("");
+  const [editingBranchId, setEditingBranchId] = useState("");
+
+  const [branchEdit, setBranchEdit] = useState({
+    shop_number: "",
+    name: "",
+  });
+
+  const loadTimer = useRef(null);
 
   const showToast = (message, type = "success") => {
     setToast({ message, type });
     window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(() => setToast(null), 4500);
+    showToast.timer = window.setTimeout(() => setToast(null), 3500);
   };
 
   const goTo = (tab) => {
     setActiveTab(tab);
     setMenuOpen(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
   };
 
-  const formatProductFromSupabase = (product) => ({
-    name: product.name,
-    category: product.category || "General",
-    stock: Number(product.stock || 0),
-    buyingPrice: Number(product.buying_price || 0),
-    sellingPrice: Number(product.selling_price || 0),
+  const mapProduct = (p) => ({
+    id: p.id,
+    name: p.name,
+    category: p.category || "General",
+    stock: num(p.stock),
+    buyingPrice: num(p.buying_price),
+    sellingPrice: num(p.selling_price),
   });
 
-  const formatSaleFromSupabase = (saleItem) => ({
-    id: saleItem.id,
-    saleType:
-      saleItem.sale_type || (saleItem.service_name ? "service" : "product"),
-    product: saleItem.product || saleItem.service_name || "Service",
-    serviceName: saleItem.service_name || "",
-    serviceNote: saleItem.service_note || "",
-    quantity: Number(saleItem.quantity || 0),
-    sellingPrice: Number(saleItem.selling_price || 0),
-    paymentMethod: saleItem.payment_method,
-    soldBy: saleItem.sold_by,
-    total: Number(saleItem.total || 0),
-    profit: Number(saleItem.profit || 0),
-    date: saleItem.sale_date,
-    time: saleItem.sale_time,
+  const mapSale = (s) => {
+    const dateKey = normalizeSaleDate(s.sale_date, s.created_at);
+
+    return {
+      id: s.id,
+      saleType: s.sale_type || (s.service_name ? "service" : "product"),
+      product: s.product || s.service_name || "Service",
+      serviceName: s.service_name || "",
+      serviceNote: s.service_note || "",
+      quantity: num(s.quantity),
+      sellingPrice: num(s.selling_price),
+      paymentMethod: s.payment_method || "Cash",
+      soldBy: s.worker_name || s.sold_by || "Unassigned",
+      branchName: s.branch_name || "Unassigned",
+      total: num(s.total),
+      profit: num(s.profit),
+      dateKey,
+      saleDate: s.sale_date || dateKey,
+      saleTime: s.sale_time || "",
+      createdAt: s.created_at || "",
+    };
+  };
+
+  const mapWorker = (w) => ({
+    id: w.id,
+    name: w.name,
+    is_active: w.is_active !== false,
   });
 
-  const formatOrderFromSupabase = (order) => ({
-    id: order.id,
-    clientName: order.client_name || "",
-    clientPhone: order.client_phone || "",
-    orderType: order.order_type || "product",
-    orderItem: order.order_item || "",
-    totalAmount: Number(order.total_amount || 0),
-    depositPaid: Number(order.deposit_paid || 0),
-    balance: Number(order.balance || 0),
-    orderDate: order.order_date || "",
-    collectionDate: order.collection_date || "",
-    status: order.status || "Pending",
-    handledBy: order.handled_by || "",
-    notes: order.notes || "",
+  const mapBranch = (b) => ({
+    id: b.id,
+    shop_number: b.shop_number,
+    name: b.name,
+    is_active: b.is_active !== false,
   });
 
-  const loadDataFromSupabase = async () => {
-    const { data: productsData, error: productsError } = await supabase
-      .from("products")
-      .select("*")
-      .order("name", { ascending: true });
+  const mapOrder = (o) => ({
+    id: o.id,
+    clientName: o.client_name || "",
+    clientPhone: o.client_phone || "",
+    orderType: o.order_type || "product",
+    orderItem: o.order_item || "",
+    totalAmount: num(o.total_amount),
+    depositPaid: num(o.deposit_paid),
+    balance: num(o.balance),
+    orderDate: o.order_date || "",
+    collectionDate: o.collection_date || "",
+    status: o.status || "Pending",
+    handledBy: o.handled_by || "",
+    notes: o.notes || "",
+  });
 
-    if (!productsError && productsData) {
-      setProducts(productsData.map(formatProductFromSupabase));
+  const loadData = async () => {
+    const [p, s, w, b, o] = await Promise.all([
+      supabase.from("products").select("*").order("name", { ascending: true }),
+      supabase.from("sales").select("*").order("created_at", { ascending: false }),
+      supabase.from("workers").select("*").order("name", { ascending: true }),
+      supabase.from("branches").select("*").order("shop_number", { ascending: true }),
+      supabase.from("orders").select("*").order("created_at", { ascending: false }),
+    ]);
+
+    if (!p.error && p.data) {
+      setProducts(p.data.map(mapProduct));
     }
 
-    const { data: salesData, error: salesError } = await supabase
-      .from("sales")
-      .select("*")
-      .order("created_at", { ascending: true });
-
-    if (!salesError && salesData) {
-      setSales(salesData.map(formatSaleFromSupabase));
+    if (!s.error && s.data) {
+      setSales(s.data.map(mapSale));
     }
 
-    const { data: workersData, error: workersError } = await supabase
-      .from("workers")
-      .select("*")
-      .order("name", { ascending: true });
-
-    if (!workersError && workersData) {
-      setWorkers(workersData);
+    if (!w.error && w.data) {
+      const list = w.data.map(mapWorker);
+      setWorkers(
+        list.length
+          ? list
+          : DEFAULT_WORKERS.map((name) => ({ name, is_active: true }))
+      );
     }
 
-    const { data: ordersData, error: ordersError } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false });
+    if (!b.error && b.data) {
+      const list = b.data.map(mapBranch);
+      setBranches(list.length ? list : DEFAULT_BRANCHES);
+    }
 
-    if (!ordersError && ordersData) {
-      setOrders(ordersData.map(formatOrderFromSupabase));
+    if (!o.error && o.data) {
+      setOrders(o.data.map(mapOrder));
     }
   };
 
-  useEffect(() => {
-    localStorage.setItem("products", JSON.stringify(products));
-  }, [products]);
+  const scheduleLoad = () => {
+    window.clearTimeout(loadTimer.current);
+    loadTimer.current = window.setTimeout(loadData, 650);
+  };
 
   useEffect(() => {
-    localStorage.setItem("sales", JSON.stringify(sales));
-  }, [sales]);
-
-  useEffect(() => {
-    localStorage.setItem("workers", JSON.stringify(workers));
-  }, [workers]);
-
-  useEffect(() => {
-    localStorage.setItem("orders", JSON.stringify(orders));
-  }, [orders]);
-
-  useEffect(() => {
-    loadDataFromSupabase();
+    loadData();
 
     const channel = supabase
-      .channel("yusuf-stock-live-updates")
+      .channel("yusuf-stock-live")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "products" },
-        loadDataFromSupabase
+        scheduleLoad
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "sales" },
-        loadDataFromSupabase
+        scheduleLoad
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "workers" },
-        loadDataFromSupabase
+        scheduleLoad
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "branches" },
+        scheduleLoad
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "orders" },
-        loadDataFromSupabase
+        scheduleLoad
       )
       .subscribe();
 
     return () => {
+      window.clearTimeout(loadTimer.current);
       supabase.removeChannel(channel);
     };
   }, []);
 
+  const activeWorkers = useMemo(() => {
+    const list = workers.filter((w) => w.is_active !== false && w.name);
+
+    return list.length
+      ? list
+      : DEFAULT_WORKERS.map((name) => ({ name, is_active: true }));
+  }, [workers]);
+
+  const activeBranches = useMemo(() => {
+    const list = branches.filter((b) => b.is_active !== false && b.name);
+    return list.length ? list : DEFAULT_BRANCHES;
+  }, [branches]);
+
   const categories = useMemo(() => {
     return Array.from(
-      new Set(products.map((product) => product.category || "General"))
+      new Set(products.map((p) => p.category || "General"))
     ).sort();
   }, [products]);
 
-  const filteredProducts = useMemo(() => {
-    const search = saleProductSearch.trim().toLowerCase();
+  const categoryStats = useMemo(() => {
+    return categories.map((category) => {
+      const list = products.filter((p) => (p.category || "General") === category);
 
-    return products
-      .filter(
-        (product) =>
-          !sale.category || (product.category || "General") === sale.category
-      )
-      .filter((product) => Number(product.stock) > 0)
-      .filter(
-        (product) =>
-          !search ||
-          `${product.name} ${product.category}`.toLowerCase().includes(search)
-      );
-  }, [products, sale.category, saleProductSearch]);
+      return {
+        category,
+        count: list.length,
+        stock: list.reduce((sum, p) => sum + num(p.stock), 0),
+      };
+    });
+  }, [categories, products]);
 
   const productsToShow = useMemo(() => {
     const search = productSearch.trim().toLowerCase();
 
     return products
       .filter(
-        (product) =>
-          !productFilterCategory ||
-          (product.category || "General") === productFilterCategory
+        (p) =>
+          selectedCategory === "All" ||
+          (p.category || "General") === selectedCategory
       )
       .filter(
-        (product) =>
+        (p) =>
           !search ||
-          `${product.name} ${product.category}`.toLowerCase().includes(search)
+          `${p.name} ${p.category}`.toLowerCase().includes(search)
       );
-  }, [products, productFilterCategory, productSearch]);
+  }, [products, selectedCategory, productSearch]);
 
-  const stockProductsToShow = useMemo(() => {
-    const search = stockSearch.trim().toLowerCase();
-    return products.filter(
-      (product) =>
-        !search ||
-        `${product.name} ${product.category}`.toLowerCase().includes(search)
-    );
-  }, [products, stockSearch]);
+  const saleProducts = useMemo(() => {
+    const search = sale.product.trim().toLowerCase();
 
-  const totalSales = useMemo(
-    () => sales.reduce((sum, s) => sum + Number(s.total || 0), 0),
-    [sales]
-  );
+    return products
+      .filter((p) => !sale.category || (p.category || "General") === sale.category)
+      .filter((p) => num(p.stock) > 0)
+      .filter(
+        (p) =>
+          !search ||
+          `${p.name} ${p.category}`.toLowerCase().includes(search)
+      );
+  }, [products, sale.category, sale.product]);
 
-  const totalProfit = useMemo(
-    () => sales.reduce((sum, s) => sum + Number(s.profit || 0), 0),
-    [sales]
-  );
-
-  const mpesaTotal = useMemo(() => {
-    return sales
-      .filter((s) => s.paymentMethod === "M-Pesa")
-      .reduce((sum, s) => sum + Number(s.total || 0), 0);
-  }, [sales]);
-
-  const cashTotal = useMemo(() => {
-    return sales
-      .filter((s) => s.paymentMethod === "Cash")
-      .reduce((sum, s) => sum + Number(s.total || 0), 0);
-  }, [sales]);
-
-  const lowStockProducts = useMemo(
-    () => products.filter((p) => Number(p.stock || 0) <= 5),
+  const lowStock = useMemo(
+    () => products.filter((p) => num(p.stock) <= 5),
     [products]
   );
 
-  const pendingOrders = useMemo(() => {
-    return orders.filter(
-      (order) => order.status !== "Collected" && order.status !== "Cancelled"
-    );
-  }, [orders]);
+  const pendingOrders = useMemo(
+    () => orders.filter((o) => !["Collected", "Cancelled"].includes(o.status)),
+    [orders]
+  );
+
+  const todaysSales = useMemo(
+    () => sales.filter((s) => s.dateKey === todayKey()),
+    [sales]
+  );
+
+  const todaySalesTotal = useMemo(
+    () => todaysSales.reduce((sum, s) => sum + num(s.total), 0),
+    [todaysSales]
+  );
+
+  const todayProfit = useMemo(
+    () => todaysSales.reduce((sum, s) => sum + num(s.profit), 0),
+    [todaysSales]
+  );
 
   const dailyReports = useMemo(() => {
-    const grouped = {};
+    const today = parseDateKey(todayKey());
+    const saleKeys = sales.map((s) => s.dateKey).filter(Boolean).sort();
+    const earliest = saleKeys[0] ? parseDateKey(saleKeys[0]) : today;
+    const start = earliest && today ? earliest : today;
+    const days = Math.max(0, Math.round((today - start) / 86400000));
+    const keys = [];
 
-    sales.forEach((saleItem) => {
-      const rawDate = saleItem.date || "Unknown date";
-      const dateObject = new Date(rawDate);
-      const validDate = !Number.isNaN(dateObject.getTime());
-      const safeDate = validDate ? dateObject.toLocaleDateString() : rawDate;
+    for (let i = 0; i <= days; i += 1) {
+      keys.push(dateKeyFromDate(addDays(today, -i)));
+    }
 
-      if (!grouped[safeDate]) {
-        grouped[safeDate] = {
-          date: safeDate,
-          day: validDate
-            ? dateObject.toLocaleDateString(undefined, { weekday: "long" })
-            : "Day",
-          totalSales: 0,
-          totalProfit: 0,
-          cash: 0,
-          mpesa: 0,
-          count: 0,
+    return keys.map((key) => {
+      const daySales = sales.filter((s) => s.dateKey === key);
+
+      const branchNames = Array.from(
+        new Set([
+          ...activeBranches.map((b) => b.name),
+          ...daySales.map((s) => s.branchName || "Unassigned"),
+        ])
+      ).filter(Boolean);
+
+      const branchReports = branchNames.map((branchName) => {
+        const list = daySales.filter(
+          (s) => (s.branchName || "Unassigned") === branchName
+        );
+
+        const branch = activeBranches.find((b) => b.name === branchName);
+
+        return {
+          branchName,
+          shop_number: branch?.shop_number,
+          totalSales: list.reduce((sum, s) => sum + num(s.total), 0),
+          totalProfit: list.reduce((sum, s) => sum + num(s.profit), 0),
+          count: list.length,
+          sales: list,
         };
-      }
+      });
 
-      grouped[safeDate].totalSales += Number(saleItem.total || 0);
-      grouped[safeDate].totalProfit += Number(saleItem.profit || 0);
-      grouped[safeDate].count += 1;
+      const workerMap = {};
 
-      if (saleItem.paymentMethod === "Cash") {
-        grouped[safeDate].cash += Number(saleItem.total || 0);
-      }
+      daySales.forEach((s) => {
+        const name = s.soldBy || "Unassigned";
 
-      if (saleItem.paymentMethod === "M-Pesa") {
-        grouped[safeDate].mpesa += Number(saleItem.total || 0);
-      }
+        if (!workerMap[name]) {
+          workerMap[name] = {
+            workerName: name,
+            totalSales: 0,
+            totalProfit: 0,
+            count: 0,
+          };
+        }
+
+        workerMap[name].totalSales += num(s.total);
+        workerMap[name].totalProfit += num(s.profit);
+        workerMap[name].count += 1;
+      });
+
+      return {
+        dateKey: key,
+        day: dayOnly(key),
+        label: niceDate(key),
+        sales: daySales,
+        totalSales: daySales.reduce((sum, s) => sum + num(s.total), 0),
+        totalProfit: daySales.reduce((sum, s) => sum + num(s.profit), 0),
+        cash: daySales
+          .filter((s) => s.paymentMethod === "Cash")
+          .reduce((sum, s) => sum + num(s.total), 0),
+        mpesa: daySales
+          .filter((s) => s.paymentMethod === "M-Pesa")
+          .reduce((sum, s) => sum + num(s.total), 0),
+        count: daySales.length,
+        branchReports,
+        workerReports: Object.values(workerMap).sort(
+          (a, b) => b.totalSales - a.totalSales
+        ),
+      };
     });
+  }, [sales, activeBranches]);
 
-    return Object.values(grouped).reverse();
-  }, [sales]);
-
-  const selectedProduct = useMemo(() => {
-    return products.find((p) => p.name === selectedProductName) || null;
-  }, [products, selectedProductName]);
+  const openProduct = (product) => {
+    setSelectedProduct(product);
+    setEditProduct({
+      name: product.name,
+      category: product.category,
+      stock: String(product.stock),
+      buyingPrice: String(product.buyingPrice),
+      sellingPrice: String(product.sellingPrice),
+    });
+    goTo("productDetail");
+  };
 
   const selectedProductSales = useMemo(() => {
-    if (!selectedProductName) return [];
+    if (!selectedProduct) return [];
 
     return sales.filter(
-      (s) =>
-        s.saleType !== "service" &&
-        String(s.product || "").toLowerCase() ===
-          selectedProductName.toLowerCase()
+      (s) => s.product?.toLowerCase() === selectedProduct.name.toLowerCase()
     );
-  }, [sales, selectedProductName]);
-
-  const selectedProductTotalSold = useMemo(() => {
-    return selectedProductSales.reduce(
-      (sum, s) => sum + Number(s.total || 0),
-      0
-    );
-  }, [selectedProductSales]);
-
-  const selectedProductProfit = useMemo(() => {
-    return selectedProductSales.reduce(
-      (sum, s) => sum + Number(s.profit || 0),
-      0
-    );
-  }, [selectedProductSales]);
-
-  const selectedProductQuantitySold = useMemo(() => {
-    return selectedProductSales.reduce(
-      (sum, s) => sum + Number(s.quantity || 0),
-      0
-    );
-  }, [selectedProductSales]);
-
-  const saleDisplayName = (s) =>
-    s.saleType === "service" ? s.serviceName || s.product : s.product;
+  }, [sales, selectedProduct]);
 
   const unlockAdmin = () => {
-    if (pinInput === ADMIN_PIN) {
-      setIsAdmin(true);
-      localStorage.setItem("isAdmin", "true");
-      setPinInput("");
-      showToast("Admin mode unlocked ✅");
-    } else {
-      alert("Wrong PIN");
-    }
+    if (pinInput !== ADMIN_PIN) return alert("Wrong PIN");
+
+    setIsAdmin(true);
+    localStorage.setItem("isAdmin", "true");
+    setPinInput("");
+    showToast("Admin mode unlocked ✅");
   };
 
   const lockAdmin = () => {
@@ -408,77 +623,36 @@ function App() {
     showToast("Admin mode locked");
   };
 
-  const addWorker = async () => {
-    const workerName = newWorker.trim();
-    if (!workerName) return alert("Enter worker name");
-
-    const workerExists = workers.some(
-      (worker) => worker.name.toLowerCase() === workerName.toLowerCase()
-    );
-
-    if (workerExists) return alert("Worker already exists");
-
-    const { error } = await supabase
-      .from("workers")
-      .insert({ name: workerName });
-
-    if (error) {
-      alert("Worker failed to save: " + error.message);
-      return;
-    }
-
-    setNewWorker("");
-    showToast(`Worker ${workerName} added ✅`);
-  };
-
-  const deleteWorker = async (workerId, workerName) => {
-    const confirmDelete = confirm(`Delete worker ${workerName}?`);
-    if (!confirmDelete) return;
-
-    const { error } = await supabase
-      .from("workers")
-      .delete()
-      .eq("id", workerId);
-
-    if (error) {
-      alert("Worker delete failed: " + error.message);
-      return;
-    }
-
-    setWorkers(workers.filter((worker) => worker.id !== workerId));
-  };
-
   const addProduct = async () => {
+    const name = newProduct.name.trim();
+
     if (
-      !newProduct.name ||
+      !name ||
       newProduct.stock === "" ||
       newProduct.buyingPrice === "" ||
       newProduct.sellingPrice === ""
     ) {
-      return alert("Fill all product details");
+      return alert("Fill product name, stock, buying price, and selling price");
     }
 
-    const productExists = products.some(
-      (p) => p.name.toLowerCase() === newProduct.name.toLowerCase()
+    const exists = products.some(
+      (p) => p.name.toLowerCase() === name.toLowerCase()
     );
 
-    if (productExists) return alert("This product already exists");
+    if (exists) return alert("This product already exists");
 
     const { error } = await supabase.from("products").upsert(
       {
-        name: newProduct.name.trim(),
+        name,
         category: newProduct.category.trim() || "General",
-        stock: Number(newProduct.stock),
-        buying_price: Number(newProduct.buyingPrice),
-        selling_price: Number(newProduct.sellingPrice),
+        stock: num(newProduct.stock),
+        buying_price: num(newProduct.buyingPrice),
+        selling_price: num(newProduct.sellingPrice),
       },
       { onConflict: "name" }
     );
 
-    if (error) {
-      alert("Product failed to save online: " + error.message);
-      return;
-    }
+    if (error) return alert("Product failed to save: " + error.message);
 
     setNewProduct({
       name: "",
@@ -489,161 +663,121 @@ function App() {
     });
 
     showToast("Product saved ✅");
+    loadData();
   };
 
-  const openProductDetail = (product) => {
-    setSelectedProductName(product.name);
+  const saveProduct = async () => {
+    if (!selectedProduct) return;
 
-    setEditProduct({
-      originalName: product.name,
-      name: product.name,
-      category: product.category || "General",
-      stock: String(product.stock),
-      buyingPrice: String(product.buyingPrice),
-      sellingPrice: String(product.sellingPrice),
-    });
+    const name = editProduct.name.trim();
 
-    goTo("productDetail");
-  };
-
-  const cancelEditProduct = () => {
-    if (selectedProduct) {
-      setEditProduct({
-        originalName: selectedProduct.name,
-        name: selectedProduct.name,
-        category: selectedProduct.category || "General",
-        stock: String(selectedProduct.stock),
-        buyingPrice: String(selectedProduct.buyingPrice),
-        sellingPrice: String(selectedProduct.sellingPrice),
-      });
-    } else {
-      setEditProduct({
-        originalName: "",
-        name: "",
-        category: "",
-        stock: "",
-        buyingPrice: "",
-        sellingPrice: "",
-      });
-    }
-  };
-
-  const saveEditedProduct = async () => {
     if (
-      !editProduct.originalName ||
-      !editProduct.name ||
+      !name ||
       editProduct.stock === "" ||
       editProduct.buyingPrice === "" ||
       editProduct.sellingPrice === ""
     ) {
-      return alert("Fill all edited product details");
+      return alert("Fill all product details");
     }
 
-    const newName = editProduct.name.trim();
-
-    const duplicateName = products.some(
+    const duplicate = products.some(
       (p) =>
-        p.name.toLowerCase() === newName.toLowerCase() &&
-        p.name.toLowerCase() !== editProduct.originalName.toLowerCase()
+        p.name.toLowerCase() === name.toLowerCase() &&
+        p.name.toLowerCase() !== selectedProduct.name.toLowerCase()
     );
 
-    if (duplicateName) return alert("Another product already has this name");
+    if (duplicate) return alert("Another product already has this name");
 
     const { error } = await supabase
       .from("products")
       .update({
-        name: newName,
+        name,
         category: editProduct.category.trim() || "General",
-        stock: Number(editProduct.stock),
-        buying_price: Number(editProduct.buyingPrice),
-        selling_price: Number(editProduct.sellingPrice),
+        stock: num(editProduct.stock),
+        buying_price: num(editProduct.buyingPrice),
+        selling_price: num(editProduct.sellingPrice),
       })
-      .eq("name", editProduct.originalName);
+      .eq("name", selectedProduct.name);
 
-    if (error) {
-      alert("Product update failed: " + error.message);
-      return;
-    }
+    if (error) return alert("Product update failed: " + error.message);
 
-    setSelectedProductName(newName);
-    setEditProduct({ ...editProduct, originalName: newName, name: newName });
     showToast("Product updated ✅");
+
+    setSelectedProduct({
+      ...selectedProduct,
+      name,
+      category: editProduct.category,
+      stock: num(editProduct.stock),
+      buyingPrice: num(editProduct.buyingPrice),
+      sellingPrice: num(editProduct.sellingPrice),
+    });
+
+    loadData();
+  };
+
+  const deleteProduct = async (name) => {
+    if (!isAdmin) return alert("Admin only");
+
+    if (!confirm(`Delete ${name}?`)) return;
+
+    const { error } = await supabase.from("products").delete().eq("name", name);
+
+    if (error) return alert("Delete failed: " + error.message);
+
+    showToast("Product deleted");
+    goTo("products");
+    loadData();
   };
 
   const updateStock = async () => {
     const product = products.find((p) => p.name === stockUpdate.product);
-    if (!product) return alert("Choose a product first");
 
-    const quantity = Number(stockUpdate.quantity);
+    if (!product) return alert("Choose product");
+
+    const quantity = num(stockUpdate.quantity);
+
     if (stockUpdate.quantity === "" || quantity < 0) {
       return alert("Enter a valid stock number");
     }
 
     const newStock =
-      stockUpdate.mode === "add" ? Number(product.stock) + quantity : quantity;
+      stockUpdate.mode === "add" ? num(product.stock) + quantity : quantity;
 
     const { error } = await supabase
       .from("products")
       .update({ stock: newStock })
       .eq("name", product.name);
 
-    if (error) {
-      alert("Stock update failed: " + error.message);
-      return;
-    }
-
-    setProducts(
-      products.map((p) =>
-        p.name === product.name ? { ...p, stock: newStock } : p
-      )
-    );
+    if (error) return alert("Stock update failed: " + error.message);
 
     setStockUpdate({ product: "", mode: "add", quantity: "" });
-    showToast(`Stock updated for ${product.name} ✅`);
-  };
-
-  const deleteProduct = async (productName) => {
-    if (!isAdmin) return alert("Admin only");
-
-    const confirmDelete = confirm(`Delete ${productName}?`);
-    if (!confirmDelete) return;
-
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("name", productName);
-
-    if (error) {
-      alert("Supabase delete failed: " + error.message);
-      return;
-    }
-
-    setProducts(products.filter((p) => p.name !== productName));
-
-    if (selectedProductName === productName) {
-      setSelectedProductName("");
-      goTo("products");
-    }
+    showToast("Stock updated ✅");
+    loadData();
   };
 
   const addSale = async () => {
     const isService = sale.saleType === "service";
-    const quantity = isService ? 1 : Number(sale.quantity);
-    const sellingPrice = Number(sale.sellingPrice);
-    const saleDate = new Date().toLocaleDateString();
-    const saleTime = new Date().toLocaleTimeString();
+    const sellingPrice = num(sale.sellingPrice);
+    const quantity = isService ? 1 : num(sale.quantity);
+    const saleDate = todayKey();
+    const saleTime = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
-    if (!sale.soldBy) return alert("Choose who sold it");
+    if (!sale.soldBy) return alert("Choose worker");
+    if (!sale.branchName) return alert("Choose shop branch");
     if (!sellingPrice || sellingPrice <= 0) return alert("Enter selling price");
 
     if (isService) {
       const serviceName = sale.serviceName.trim();
+
       if (!serviceName) return alert("Enter service name");
 
       const total = sellingPrice;
       const profit = sellingPrice;
 
-      const { error: saleError } = await supabase.from("sales").insert({
+      const { error } = await supabase.from("sales").insert({
         sale_type: "service",
         product: serviceName,
         service_name: serviceName,
@@ -652,18 +786,18 @@ function App() {
         selling_price: sellingPrice,
         payment_method: sale.paymentMethod,
         sold_by: sale.soldBy,
+        worker_name: sale.soldBy,
+        branch_name: sale.branchName,
         total,
         profit,
         sale_date: saleDate,
         sale_time: saleTime,
       });
 
-      if (saleError) {
-        alert("Service failed to save: " + saleError.message);
-        return;
-      }
+      if (error) return alert("Service failed to save: " + error.message);
 
-      setSale({
+      setSale((current) => ({
+        ...current,
         saleType: "product",
         category: "",
         product: "",
@@ -671,121 +805,87 @@ function App() {
         sellingPrice: "",
         serviceName: "",
         serviceNote: "",
-        paymentMethod: "Cash",
-        soldBy: "",
-      });
+      }));
 
-      setSaleProductSearch("");
-      showToast(
-        `✅ Service "${serviceName}" done by ${sale.soldBy} • KSh ${total.toLocaleString()}`
-      );
+      showToast(`Service saved • ${sale.soldBy} • ${sale.branchName}`);
+      loadData();
       return;
     }
 
     const product = products.find((p) => p.name === sale.product);
-    if (!product) return alert("Choose a product first");
 
-    if (!sale.category || !quantity || quantity <= 0 || !sellingPrice) {
-      return alert(
-        "Fill category, product, quantity, selling price, and sold by"
-      );
-    }
+    if (!product) return alert("Choose product");
+    if (!quantity || quantity <= 0) return alert("Enter quantity");
+    if (quantity > num(product.stock)) return alert("Not enough stock");
 
-    if (quantity > Number(product.stock)) return alert("Not enough stock");
-
-    const newStock = Number(product.stock) - quantity;
-    const profit = (sellingPrice - Number(product.buyingPrice)) * quantity;
     const total = sellingPrice * quantity;
+    const profit = (sellingPrice - num(product.buyingPrice)) * quantity;
+    const newStock = num(product.stock) - quantity;
 
     const { error: saleError } = await supabase.from("sales").insert({
       sale_type: "product",
-      product: sale.product,
+      product: product.name,
       service_name: null,
       service_note: null,
       quantity,
       selling_price: sellingPrice,
       payment_method: sale.paymentMethod,
       sold_by: sale.soldBy,
+      worker_name: sale.soldBy,
+      branch_name: sale.branchName,
       total,
       profit,
       sale_date: saleDate,
       sale_time: saleTime,
     });
 
-    if (saleError) {
-      alert("Sale failed to save: " + saleError.message);
-      return;
-    }
+    if (saleError) return alert("Sale failed to save: " + saleError.message);
 
     const { error: stockError } = await supabase
       .from("products")
       .update({ stock: newStock })
-      .eq("name", sale.product);
+      .eq("name", product.name);
 
     if (stockError) {
-      alert("Sale saved, but stock update failed: " + stockError.message);
-      return;
+      return alert("Sale saved, but stock failed to update: " + stockError.message);
     }
 
-    setSale({
-      saleType: "product",
+    setSale((current) => ({
+      ...current,
       category: "",
       product: "",
       quantity: "",
       sellingPrice: "",
       serviceName: "",
       serviceNote: "",
-      paymentMethod: "Cash",
-      soldBy: "",
-    });
+    }));
 
-    setSaleProductSearch("");
-    showToast(
-      `✅ ${product.name} ×${quantity} sold by ${
-        sale.soldBy
-      } • KSh ${total.toLocaleString()}`
-    );
+    showToast(`${product.name} sold • ${sale.branchName}`);
+    loadData();
   };
 
-  const deleteSale = async (saleIndex) => {
+  const deleteSale = async (id) => {
     if (!isAdmin) return alert("Admin only");
 
-    const confirmDelete = confirm("Delete this sale?");
-    if (!confirmDelete) return;
+    if (!confirm("Delete this sale?")) return;
 
-    const saleToDelete = sales[saleIndex];
+    const { error } = await supabase.from("sales").delete().eq("id", id);
 
-    if (saleToDelete?.id) {
-      const { error } = await supabase
-        .from("sales")
-        .delete()
-        .eq("id", saleToDelete.id);
+    if (error) return alert("Sale delete failed: " + error.message);
 
-      if (error) {
-        alert("Supabase delete failed: " + error.message);
-        return;
-      }
-    }
-
-    setSales(sales.filter((_, index) => index !== saleIndex));
+    showToast("Sale deleted");
+    loadData();
   };
 
   const addOrder = async () => {
-    const totalAmount = Number(newOrder.totalAmount || 0);
-    const depositPaid = Number(newOrder.depositPaid || 0);
-    const balance = totalAmount - depositPaid;
+    const totalAmount = num(newOrder.totalAmount);
+    const depositPaid = num(newOrder.depositPaid);
 
-    if (
-      !newOrder.clientName.trim() ||
-      !newOrder.orderItem.trim() ||
-      !newOrder.handledBy
-    ) {
-      return alert("Fill client name, ordered item/service, and handled by");
+    if (!newOrder.clientName.trim() || !newOrder.orderItem.trim() || !newOrder.handledBy) {
+      return alert("Fill client name, item/service, and handled by");
     }
 
-    if (depositPaid > totalAmount) {
-      return alert("Deposit cannot be more than total amount");
-    }
+    if (depositPaid > totalAmount) return alert("Deposit cannot be more than total");
 
     const { error } = await supabase.from("orders").insert({
       client_name: newOrder.clientName.trim(),
@@ -794,24 +894,15 @@ function App() {
       order_item: newOrder.orderItem.trim(),
       total_amount: totalAmount,
       deposit_paid: depositPaid,
-      balance,
-      order_date: newOrder.orderDate || new Date().toISOString().slice(0, 10),
+      balance: totalAmount - depositPaid,
+      order_date: todayKey(),
       collection_date: newOrder.collectionDate || null,
       status: newOrder.status,
       handled_by: newOrder.handledBy,
       notes: newOrder.notes.trim(),
     });
 
-    if (error) {
-      alert("Order failed to save: " + error.message);
-      return;
-    }
-
-    showToast(
-      `🧾 Order saved for ${
-        newOrder.clientName
-      } • Deposit KSh ${depositPaid.toLocaleString()}`
-    );
+    if (error) return alert("Order failed to save: " + error.message);
 
     setNewOrder({
       clientName: "",
@@ -820,238 +911,191 @@ function App() {
       orderItem: "",
       totalAmount: "",
       depositPaid: "",
-      orderDate: new Date().toISOString().slice(0, 10),
       collectionDate: "",
       status: "Pending",
       handledBy: "",
       notes: "",
     });
+
+    showToast("Order saved ✅");
+    loadData();
   };
 
-  const updateOrderStatus = async (orderId, status) => {
-    const { error } = await supabase
-      .from("orders")
-      .update({ status })
-      .eq("id", orderId);
+  const updateOrderStatus = async (id, status) => {
+    const { error } = await supabase.from("orders").update({ status }).eq("id", id);
 
-    if (error) {
-      alert("Order update failed: " + error.message);
-      return;
-    }
+    if (error) return alert("Order update failed: " + error.message);
 
-    setOrders(
-      orders.map((order) =>
-        order.id === orderId ? { ...order, status } : order
-      )
-    );
-
-    showToast(`Order marked as ${status} ✅`);
+    showToast(`Order marked ${status}`);
+    loadData();
   };
 
-  const deleteOrder = async (orderId) => {
+  const deleteOrder = async (id) => {
     if (!isAdmin) return alert("Admin only");
 
-    const confirmDelete = confirm("Delete this order?");
-    if (!confirmDelete) return;
+    if (!confirm("Delete order?")) return;
 
-    const { error } = await supabase.from("orders").delete().eq("id", orderId);
+    const { error } = await supabase.from("orders").delete().eq("id", id);
 
-    if (error) {
-      alert("Order delete failed: " + error.message);
-      return;
-    }
+    if (error) return alert("Order delete failed: " + error.message);
 
-    setOrders(orders.filter((order) => order.id !== orderId));
+    showToast("Order deleted");
+    loadData();
   };
 
-  const parseCSVLine = (line) => {
-    const values = [];
-    let current = "";
-    let insideQuotes = false;
+  const addWorker = async () => {
+    const name = newWorker.trim();
 
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      const nextChar = line[i + 1];
+    if (!name) return alert("Enter worker name");
 
-      if (char === '"' && nextChar === '"') {
-        current += '"';
-        i++;
-      } else if (char === '"') {
-        insideQuotes = !insideQuotes;
-      } else if (char === "," && !insideQuotes) {
-        values.push(current.trim());
-        current = "";
-      } else {
-        current += char;
-      }
+    if (workers.some((w) => w.name.toLowerCase() === name.toLowerCase())) {
+      return alert("Worker already exists");
     }
 
-    values.push(current.trim());
-    return values;
+    const { error } = await supabase.from("workers").insert({
+      name,
+      is_active: true,
+    });
+
+    if (error) return alert("Worker failed to save: " + error.message);
+
+    setNewWorker("");
+    showToast("Worker added ✅");
+    loadData();
   };
 
-  const importProductsFromCSV = (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  const saveWorker = async (worker) => {
+    const name = workerEditName.trim();
 
-    const reader = new FileReader();
+    if (!name) return alert("Enter worker name");
 
-    reader.onload = async (e) => {
-      const text = e.target.result;
-      const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
+    const duplicate = workers.some(
+      (w) => w.id !== worker.id && w.name.toLowerCase() === name.toLowerCase()
+    );
 
-      if (lines.length < 2) {
-        return alert("CSV file is empty or not formatted correctly");
-      }
+    if (duplicate) return alert("Another worker already has that name");
 
-      const headers = parseCSVLine(lines[0]).map((header) =>
-        header.trim().toLowerCase()
-      );
+    const { error } = await supabase
+      .from("workers")
+      .update({ name })
+      .eq("id", worker.id);
 
-      const importedProducts = lines
-        .slice(1)
-        .map((line) => {
-          const values = parseCSVLine(line);
-          const row = {};
+    if (error) return alert("Worker update failed: " + error.message);
 
-          headers.forEach((header, index) => {
-            row[header] = values[index] || "";
-          });
+    setEditingWorkerId("");
+    setWorkerEditName("");
+    showToast("Worker updated ✅");
+    loadData();
+  };
 
-          const buyingPrice = Number(row.buyingprice || row.buying_price || 0);
-          const sellingPrice = Number(
-            row.sellingprice || row.selling_price || buyingPrice
-          );
+  const toggleWorker = async (worker) => {
+    const { error } = await supabase
+      .from("workers")
+      .update({ is_active: worker.is_active === false })
+      .eq("id", worker.id);
 
-          return {
-            name: row.name || row.product || row.productname,
-            category: row.category || "General",
-            stock: Number(row.stock || row.quantity || 0),
-            buyingPrice,
-            sellingPrice,
-          };
-        })
-        .filter((product) => product.name);
+    if (error) return alert("Worker status failed: " + error.message);
 
-      if (importedProducts.length === 0) {
-        return alert("No valid products found in the CSV");
-      }
+    showToast(worker.is_active === false ? "Worker reactivated" : "Worker deactivated");
+    loadData();
+  };
 
-      setProducts((currentProducts) => {
-        const productsMap = new Map();
+  const addBranch = async () => {
+    const name = newBranch.name.trim();
 
-        currentProducts.forEach((product) =>
-          productsMap.set(product.name.toLowerCase(), product)
-        );
+    if (!name) return alert("Enter branch name");
 
-        importedProducts.forEach((product) =>
-          productsMap.set(product.name.toLowerCase(), product)
-        );
+    if (branches.some((b) => b.name.toLowerCase() === name.toLowerCase())) {
+      return alert("Branch already exists");
+    }
 
-        return Array.from(productsMap.values());
-      });
+    const { error } = await supabase.from("branches").insert({
+      name,
+      shop_number: newBranch.shop_number ? num(newBranch.shop_number) : null,
+      is_active: true,
+    });
 
-      alert(`${importedProducts.length} products imported locally`);
-      event.target.value = "";
-    };
+    if (error) return alert("Branch failed to save: " + error.message);
 
-    reader.readAsText(file);
+    setNewBranch({ shop_number: "", name: "" });
+    showToast("Branch added ✅");
+    loadData();
+  };
+
+  const saveBranch = async (branch) => {
+    const name = branchEdit.name.trim();
+
+    if (!name) return alert("Enter branch name");
+
+    const duplicate = branches.some(
+      (b) => b.id !== branch.id && b.name.toLowerCase() === name.toLowerCase()
+    );
+
+    if (duplicate) return alert("Another branch already has that name");
+
+    const { error } = await supabase
+      .from("branches")
+      .update({
+        name,
+        shop_number: branchEdit.shop_number ? num(branchEdit.shop_number) : null,
+      })
+      .eq("id", branch.id);
+
+    if (error) return alert("Branch update failed: " + error.message);
+
+    setEditingBranchId("");
+    setBranchEdit({ shop_number: "", name: "" });
+    showToast("Branch updated ✅");
+    loadData();
+  };
+
+  const toggleBranch = async (branch) => {
+    const { error } = await supabase
+      .from("branches")
+      .update({ is_active: branch.is_active === false })
+      .eq("id", branch.id);
+
+    if (error) return alert("Branch status failed: " + error.message);
+
+    showToast(branch.is_active === false ? "Branch reactivated" : "Branch deactivated");
+    loadData();
   };
 
   const downloadCSV = (filename, rows) => {
-    if (!rows || rows.length === 0) {
-      return alert("No data available to export");
-    }
+    if (!rows.length) return alert("No data to export");
 
     const headers = Object.keys(rows[0]);
-    const csvContent = [
+
+    const csv = [
       headers.join(","),
       ...rows.map((row) =>
         headers
-          .map((header) => {
-            const value = row[header] ?? "";
-            const safeValue = String(value).replaceAll('"', '""');
-            return `"${safeValue}"`;
-          })
+          .map((h) => `"${String(row[h] ?? "").replaceAll('"', '""')}"`)
           .join(",")
       ),
     ].join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    const a = document.createElement("a");
 
-    link.href = url;
-    link.download = filename;
-    link.click();
+    a.href = url;
+    a.download = filename;
+    a.click();
 
     URL.revokeObjectURL(url);
   };
 
-  const exportProductsCSV = () =>
-    downloadCSV("yusuf_products_backup.csv", products);
-
-  const exportSalesCSV = () => downloadCSV("yusuf_sales_backup.csv", sales);
-
-  const exportOrdersCSV = () => downloadCSV("yusuf_orders_backup.csv", orders);
-
-  const testSupabaseConnection = async () => {
+  const testConnection = async () => {
     const { error } = await supabase.from("products").select("*").limit(1);
 
-    if (error) {
-      alert("Supabase error: " + error.message);
-      return;
-    }
+    if (error) return alert("Supabase error: " + error.message);
 
-    showToast("Supabase connected successfully ✅");
+    showToast("Supabase connected ✅");
   };
 
-  const syncProductsToSupabase = async () => {
-    if (products.length === 0) return alert("No products to sync");
-
-    const productsToUpload = products.map((product) => ({
-      name: product.name,
-      category: product.category || "General",
-      stock: Number(product.stock || 0),
-      buying_price: Number(product.buyingPrice || 0),
-      selling_price: Number(product.sellingPrice || 0),
-    }));
-
-    const { error } = await supabase
-      .from("products")
-      .upsert(productsToUpload, { onConflict: "name" });
-
-    if (error) {
-      alert("Sync failed: " + error.message);
-      return;
-    }
-
-    showToast(`${products.length} products synced to Supabase ✅`);
-  };
-
-  const loadProductsFromSupabase = async () => {
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .order("name", { ascending: true });
-
-    if (error) return alert("Failed to load products: " + error.message);
-
-    setProducts(data.map(formatProductFromSupabase));
-    showToast(`${data.length} products loaded from Supabase ✅`);
-  };
-
-  const loadSalesFromSupabase = async () => {
-    const { data, error } = await supabase
-      .from("sales")
-      .select("*")
-      .order("created_at", { ascending: true });
-
-    if (error) return alert("Failed to load sales: " + error.message);
-
-    setSales(data.map(formatSaleFromSupabase));
-    showToast(`${data.length} sales loaded from Supabase ✅`);
-  };
+  const saleName = (s) =>
+    s.saleType === "service" ? s.serviceName || s.product : s.product;
 
   const SideMenu = () => (
     <>
@@ -1060,7 +1104,7 @@ function App() {
           className="menu-backdrop"
           type="button"
           onClick={() => setMenuOpen(false)}
-        ></button>
+        />
       )}
 
       <aside className={menuOpen ? "side-menu open" : "side-menu"}>
@@ -1075,29 +1119,12 @@ function App() {
           </button>
         </div>
 
-        <button type="button" onClick={() => goTo("dashboard")}>
-          🏠 Dashboard
-        </button>
-
-        <button type="button" onClick={() => goTo("products")}>
-          📦 Products
-        </button>
-
-        <button type="button" onClick={() => goTo("sales")}>
-          ➕ New Sale
-        </button>
-
-        <button type="button" onClick={() => goTo("orders")}>
-          🧾 Client Orders
-        </button>
-
-        <button type="button" onClick={() => goTo("reports")}>
-          📊 Reports
-        </button>
-
-        <button type="button" onClick={() => goTo("more")}>
-          ⚙️ More
-        </button>
+        <button type="button" onClick={() => goTo("dashboard")}>🏠 Dashboard</button>
+        <button type="button" onClick={() => goTo("products")}>📦 Products</button>
+        <button type="button" onClick={() => goTo("sales")}>➕ New Sale</button>
+        <button type="button" onClick={() => goTo("orders")}>🧾 Client Orders</button>
+        <button type="button" onClick={() => goTo("reports")}>📊 Reports</button>
+        <button type="button" onClick={() => goTo("more")}>⚙️ More</button>
       </aside>
     </>
   );
@@ -1106,24 +1133,24 @@ function App() {
     <>
       <div className="hero-card">
         <div>
-          <p className="muted">{SHOP_NAME}</p>
-          <h1>KSh {totalProfit.toLocaleString()}</h1>
-          <span className="green-text">▲ Total Profit</span>
+          <p className="muted">Today • {niceDate(todayKey())}</p>
+          <h1>{money(todaySalesTotal)}</h1>
+          <span className="green-text">Today’s Total Sales</span>
         </div>
 
         <div className="mini-chart">
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
         </div>
       </div>
 
       <div className="stats-grid">
         <div className="stat-card pink">
-          <p>Today Sales</p>
-          <h2>KSh {totalSales.toLocaleString()}</h2>
+          <p>Today Profit</p>
+          <h2>{money(todayProfit)}</h2>
         </div>
 
         <div className="stat-card teal">
@@ -1143,17 +1170,16 @@ function App() {
         <button
           className="stat-card danger clickable-card"
           type="button"
-          onClick={() => goTo("reports")}
+          onClick={() => goTo("products")}
         >
           <p>Low Stock</p>
-          <h2>{lowStockProducts.length}</h2>
+          <h2>{lowStock.length}</h2>
         </button>
       </div>
 
       <div className="panel">
         <div className="panel-head">
           <h2>Recent Sales</h2>
-
           <button className="link-btn" type="button" onClick={() => goTo("sales")}>
             View all
           </button>
@@ -1162,58 +1188,71 @@ function App() {
         {sales.length === 0 ? (
           <p className="empty">No sales yet</p>
         ) : (
-          sales
-            .slice(-4)
-            .reverse()
-            .map((s, index) => (
-              <div className="sale-row" key={s.id || index}>
-                <div className="item-icon">
-                  {s.saleType === "service" ? "🛠️" : "📦"}
-                </div>
+          sales.slice(0, 5).map((s) => (
+            <div className="sale-row" key={s.id}>
+              <div className="item-icon">{s.saleType === "service" ? "🛠️" : "📦"}</div>
 
-                <div>
-                  <h3>{saleDisplayName(s)}</h3>
-                  <p>
-                    {s.saleType === "service" ? "Service" : `Qty ${s.quantity}`} •{" "}
-                    {s.soldBy} • {s.paymentMethod}
-                  </p>
-                </div>
-
-                <strong>KSh {Number(s.total || 0).toLocaleString()}</strong>
+              <div>
+                <h3>{saleName(s)}</h3>
+                <p>{s.soldBy} • {s.branchName} • {s.paymentMethod}</p>
               </div>
-            ))
+
+              <strong>{money(s.total)}</strong>
+            </div>
+          ))
         )}
       </div>
     </>
   );
 
   const Products = () => (
-    <div className="panel">
-      <h2>Products</h2>
+    <div className="panel stable-form">
+      <div className="panel-head">
+        <h2>Products</h2>
+        <span className="report-count">{productsToShow.length} shown</span>
+      </div>
 
-      <div className="form-box">
-        <h3>Search Products</h3>
+      <input
+        placeholder="Search product or category..."
+        autoComplete="off"
+        value={productSearch}
+        onChange={(e) => setProductSearch(e.target.value)}
+      />
 
-        <input
-          placeholder="Search product name or category..."
-          autoComplete="off"
-          value={productSearch}
-          onChange={(e) => setProductSearch(e.target.value)}
-        />
-
-        <select
-          value={productFilterCategory}
-          onChange={(e) => setProductFilterCategory(e.target.value)}
+      <div className="category-tabs">
+        <button
+          type="button"
+          className={selectedCategory === "All" ? "cat-tab active" : "cat-tab"}
+          onClick={() => setSelectedCategory("All")}
         >
-          <option value="">All Categories</option>
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
-          ))}
-        </select>
+          All
+        </button>
 
-        <p className="import-note">Showing {productsToShow.length} products</p>
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            className={selectedCategory === cat ? "cat-tab active" : "cat-tab"}
+            onClick={() => setSelectedCategory(cat)}
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      <div className="category-card-grid">
+        {categoryStats.slice(0, 10).map((cat) => (
+          <button
+            key={cat.category}
+            type="button"
+            className={selectedCategory === cat.category ? "category-card active" : "category-card"}
+            onClick={() => setSelectedCategory(cat.category)}
+          >
+            <CategoryVector category={cat.category} />
+            <strong>{cat.category}</strong>
+            <small>{cat.count} products • {cat.stock} stock</small>
+          </button>
+        ))}
       </div>
 
       {isAdmin && (
@@ -1221,7 +1260,7 @@ function App() {
           <h3>Quick Stock Update</h3>
 
           <input
-            placeholder="Search product before updating stock..."
+            placeholder="Search product before choosing below..."
             autoComplete="off"
             value={stockSearch}
             onChange={(e) => setStockSearch(e.target.value)}
@@ -1229,32 +1268,34 @@ function App() {
 
           <select
             value={stockUpdate.product}
-            onChange={(e) =>
-              setStockUpdate({ ...stockUpdate, product: e.target.value })
-            }
+            onChange={(e) => setStockUpdate({ ...stockUpdate, product: e.target.value })}
           >
             <option value="">Select product</option>
-            {stockProductsToShow.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name} - Current Stock: {p.stock}
-              </option>
-            ))}
+            {products
+              .filter(
+                (p) =>
+                  !stockSearch ||
+                  `${p.name} ${p.category}`.toLowerCase().includes(stockSearch.toLowerCase())
+              )
+              .map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name} - Current stock: {p.stock}
+                </option>
+              ))}
           </select>
 
           <div className="payment-buttons">
             <button
-              className={
-                stockUpdate.mode === "add" ? "pay active mpesa" : "pay"
-              }
               type="button"
+              className={stockUpdate.mode === "add" ? "pay active mpesa" : "pay"}
               onClick={() => setStockUpdate({ ...stockUpdate, mode: "add" })}
             >
               Add Stock
             </button>
 
             <button
-              className={stockUpdate.mode === "set" ? "pay active" : "pay"}
               type="button"
+              className={stockUpdate.mode === "set" ? "pay active" : "pay"}
               onClick={() => setStockUpdate({ ...stockUpdate, mode: "set" })}
             >
               Set Exact
@@ -1264,15 +1305,9 @@ function App() {
           <input
             type="number"
             inputMode="numeric"
-            placeholder={
-              stockUpdate.mode === "add"
-                ? "Quantity to add"
-                : "Set stock to this number"
-            }
+            placeholder={stockUpdate.mode === "add" ? "Quantity to add" : "Set exact stock"}
             value={stockUpdate.quantity}
-            onChange={(e) =>
-              setStockUpdate({ ...stockUpdate, quantity: e.target.value })
-            }
+            onChange={(e) => setStockUpdate({ ...stockUpdate, quantity: e.target.value })}
           />
 
           <button className="primary-btn" type="button" onClick={updateStock}>
@@ -1282,166 +1317,76 @@ function App() {
       )}
 
       {isAdmin && (
-        <>
-          <div className="form-box">
-            <h3>Import Products from CSV</h3>
+        <div className="form-box">
+          <h3>Add Product</h3>
 
-            <p className="import-note">
-              Upload your CSV file with columns: name, category, stock,
-              buyingPrice, sellingPrice.
-            </p>
+          <input
+            placeholder="Product name"
+            autoComplete="off"
+            value={newProduct.name}
+            onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+          />
 
-            <input
-              className="file-input"
-              type="file"
-              accept=".csv"
-              onChange={importProductsFromCSV}
-            />
-          </div>
+          <input
+            placeholder="Category e.g Chargers"
+            autoComplete="off"
+            value={newProduct.category}
+            onChange={(e) => setNewProduct({ ...newProduct, category: e.target.value })}
+          />
 
-          <div className="form-box">
-            <h3>Backup Data</h3>
+          <input
+            type="number"
+            inputMode="numeric"
+            placeholder="Stock quantity"
+            value={newProduct.stock}
+            onChange={(e) => setNewProduct({ ...newProduct, stock: e.target.value })}
+          />
 
-            <p className="import-note">
-              Download a backup copy of your products, sales, and orders.
-            </p>
+          <input
+            type="number"
+            inputMode="decimal"
+            placeholder="Buying price"
+            value={newProduct.buyingPrice}
+            onChange={(e) => setNewProduct({ ...newProduct, buyingPrice: e.target.value })}
+          />
 
-            <button
-              className="primary-btn"
-              type="button"
-              onClick={exportProductsCSV}
-            >
-              Export Products CSV
-            </button>
+          <input
+            type="number"
+            inputMode="decimal"
+            placeholder="Selling price"
+            value={newProduct.sellingPrice}
+            onChange={(e) => setNewProduct({ ...newProduct, sellingPrice: e.target.value })}
+          />
 
-            <br />
-            <br />
-
-            <button
-              className="secondary-btn"
-              type="button"
-              onClick={exportSalesCSV}
-            >
-              Export Sales CSV
-            </button>
-
-            <br />
-            <br />
-
-            <button
-              className="secondary-btn"
-              type="button"
-              onClick={exportOrdersCSV}
-            >
-              Export Orders CSV
-            </button>
-          </div>
-
-          <div className="form-box">
-            <h3>Add Product</h3>
-
-            <input
-              placeholder="Product name"
-              autoComplete="off"
-              value={newProduct.name}
-              onChange={(e) =>
-                setNewProduct({ ...newProduct, name: e.target.value })
-              }
-            />
-
-            <input
-              placeholder="Category e.g Accessories"
-              autoComplete="off"
-              value={newProduct.category}
-              onChange={(e) =>
-                setNewProduct({ ...newProduct, category: e.target.value })
-              }
-            />
-
-            <input
-              type="number"
-              inputMode="numeric"
-              placeholder="Stock quantity"
-              value={newProduct.stock}
-              onChange={(e) =>
-                setNewProduct({ ...newProduct, stock: e.target.value })
-              }
-            />
-
-            <input
-              type="number"
-              inputMode="numeric"
-              placeholder="Buying price"
-              value={newProduct.buyingPrice}
-              onChange={(e) =>
-                setNewProduct({ ...newProduct, buyingPrice: e.target.value })
-              }
-            />
-
-            <input
-              type="number"
-              inputMode="numeric"
-              placeholder="Selling price"
-              value={newProduct.sellingPrice}
-              onChange={(e) =>
-                setNewProduct({ ...newProduct, sellingPrice: e.target.value })
-              }
-            />
-
-            <button className="primary-btn" type="button" onClick={addProduct}>
-              Add Product
-            </button>
-          </div>
-        </>
+          <button className="primary-btn" type="button" onClick={addProduct}>
+            Add Product
+          </button>
+        </div>
       )}
 
-      {!isAdmin && (
-        <p className="import-note">
-          Worker mode: you can view products and make sales. Admin controls are
-          locked.
-        </p>
-      )}
-
-      <div className="product-list">
+      <div className="product-table">
         {productsToShow.length === 0 ? (
           <p className="empty">No products found</p>
         ) : (
           productsToShow.map((p) => (
-            <div className="product-card" key={p.name}>
-              <button
-                className="product-main"
-                type="button"
-                onClick={() => openProductDetail(p)}
-              >
-                <div className="product-image">📱</div>
+            <button
+              className="product-row"
+              type="button"
+              key={p.name}
+              onClick={() => openProduct(p)}
+            >
+              <CategoryVector category={p.category} />
 
-                <div className="product-info">
-                  <h3>{p.name}</h3>
-                  <p>{p.category || "General"}</p>
-                  <span>KSh {Number(p.sellingPrice || 0).toLocaleString()}</span>
-                </div>
-
-                <div
-                  className={
-                    Number(p.stock || 0) <= 5 ? "stock-badge low" : "stock-badge"
-                  }
-                >
-                  {p.stock}
-                </div>
-              </button>
-
-              <div className="sale-actions">
-                <button type="button" onClick={() => openProductDetail(p)}>
-                  View/Edit
-                </button>
-
-                {isAdmin && (
-                  <button type="button" onClick={() => deleteProduct(p.name)}>
-                    Delete
-                  </button>
-                )}
+              <div className="product-copy">
+                <h3>{p.name}</h3>
+                <p>{p.category || "General"}</p>
+                <strong>{money(p.sellingPrice)}</strong>
               </div>
-            </div>
+
+              <div className={p.stock <= 5 ? "stock-badge low" : "stock-badge"}>
+                {p.stock}
+              </div>
+            </button>
           ))
         )}
       </div>
@@ -1452,18 +1397,28 @@ function App() {
     if (!selectedProduct) {
       return (
         <div className="panel">
-          <h2>Product Details</h2>
-          <p className="empty">Choose a product first</p>
-          <button
-            className="secondary-btn"
-            type="button"
-            onClick={() => goTo("products")}
-          >
-            Back to Products
+          <button className="back-btn" type="button" onClick={() => goTo("products")}>
+            ← Back
           </button>
+          <p className="empty">Select a product first</p>
         </div>
       );
     }
+
+    const productSalesTotal = selectedProductSales.reduce(
+      (sum, s) => sum + num(s.total),
+      0
+    );
+
+    const productProfit = selectedProductSales.reduce(
+      (sum, s) => sum + num(s.profit),
+      0
+    );
+
+    const qtySold = selectedProductSales.reduce(
+      (sum, s) => sum + num(s.quantity),
+      0
+    );
 
     return (
       <>
@@ -1473,18 +1428,12 @@ function App() {
           </button>
 
           <div className="product-detail-head">
-            <div className="product-detail-icon">📱</div>
+            <CategoryVector category={selectedProduct.category} />
 
             <div>
-              <p className="muted">{selectedProduct.category || "General"}</p>
+              <p className="muted">{selectedProduct.category}</p>
               <h2>{selectedProduct.name}</h2>
-              <p
-                className={
-                  Number(selectedProduct.stock || 0) <= 5
-                    ? "danger-text"
-                    : "green-text"
-                }
-              >
+              <p className={selectedProduct.stock <= 5 ? "danger-text" : "green-text"}>
                 Current stock: {selectedProduct.stock}
               </p>
             </div>
@@ -1498,82 +1447,66 @@ function App() {
 
             <div className="stat-card pink">
               <p>Qty Sold</p>
-              <h2>{selectedProductQuantitySold}</h2>
+              <h2>{qtySold}</h2>
             </div>
 
             <div className="stat-card orange">
               <p>Total Sold</p>
-              <h2>KSh {selectedProductTotalSold.toLocaleString()}</h2>
+              <h2>{money(productSalesTotal)}</h2>
             </div>
 
             <div className="stat-card danger">
               <p>Profit</p>
-              <h2>KSh {selectedProductProfit.toLocaleString()}</h2>
+              <h2>{money(productProfit)}</h2>
             </div>
           </div>
         </div>
 
         {isAdmin && (
-          <div className="panel">
+          <div className="panel stable-form">
             <h2>Edit Product</h2>
 
             <input
-              placeholder="Product name"
-              autoComplete="off"
               value={editProduct.name}
-              onChange={(e) =>
-                setEditProduct({ ...editProduct, name: e.target.value })
-              }
+              onChange={(e) => setEditProduct({ ...editProduct, name: e.target.value })}
             />
 
             <input
-              placeholder="Category"
-              autoComplete="off"
               value={editProduct.category}
-              onChange={(e) =>
-                setEditProduct({ ...editProduct, category: e.target.value })
-              }
+              onChange={(e) => setEditProduct({ ...editProduct, category: e.target.value })}
             />
 
             <input
               type="number"
-              inputMode="numeric"
-              placeholder="Stock"
               value={editProduct.stock}
-              onChange={(e) =>
-                setEditProduct({ ...editProduct, stock: e.target.value })
-              }
+              onChange={(e) => setEditProduct({ ...editProduct, stock: e.target.value })}
             />
 
             <input
               type="number"
-              inputMode="numeric"
-              placeholder="Buying price"
               value={editProduct.buyingPrice}
-              onChange={(e) =>
-                setEditProduct({ ...editProduct, buyingPrice: e.target.value })
-              }
+              onChange={(e) => setEditProduct({ ...editProduct, buyingPrice: e.target.value })}
             />
 
             <input
               type="number"
-              inputMode="numeric"
-              placeholder="Selling price"
               value={editProduct.sellingPrice}
-              onChange={(e) =>
-                setEditProduct({ ...editProduct, sellingPrice: e.target.value })
-              }
+              onChange={(e) => setEditProduct({ ...editProduct, sellingPrice: e.target.value })}
             />
 
-            <button className="primary-btn" type="button" onClick={saveEditedProduct}>
-              Save Product Changes
+            <button className="primary-btn" type="button" onClick={saveProduct}>
+              Save Changes
             </button>
 
             <br />
             <br />
 
-            <button className="secondary-btn" type="button" onClick={cancelEditProduct}>
-              Reset Form
+            <button
+              className="secondary-btn"
+              type="button"
+              onClick={() => deleteProduct(selectedProduct.name)}
+            >
+              Delete Product
             </button>
           </div>
         )}
@@ -1582,28 +1515,21 @@ function App() {
           <h2>Related Sales</h2>
 
           {selectedProductSales.length === 0 ? (
-            <p className="empty">No sales for this product yet</p>
+            <p className="empty">No sales yet</p>
           ) : (
-            selectedProductSales
-              .slice()
-              .reverse()
-              .map((s, index) => (
-                <div className="sale-row" key={s.id || index}>
-                  <div className="item-icon">✅</div>
+            selectedProductSales.map((s) => (
+              <div className="sale-row" key={s.id}>
+                <div className="item-icon">✅</div>
 
-                  <div>
-                    <h3>{s.product}</h3>
-                    <p>
-                      Qty {s.quantity} • {s.soldBy} • {s.paymentMethod}
-                    </p>
-                    <p>
-                      {s.date} {s.time}
-                    </p>
-                  </div>
-
-                  <strong>KSh {Number(s.total || 0).toLocaleString()}</strong>
+                <div>
+                  <h3>{saleName(s)}</h3>
+                  <p>Qty {s.quantity} • {s.soldBy} • {s.branchName}</p>
+                  <p>{niceDate(s.dateKey)} • {s.paymentMethod}</p>
                 </div>
-              ))
+
+                <strong>{money(s.total)}</strong>
+              </div>
+            ))
           )}
         </div>
       </>
@@ -1611,37 +1537,22 @@ function App() {
   };
 
   const Sales = () => (
-    <div className="panel">
+    <div className="panel stable-form">
       <h2>New Sale</h2>
 
       <div className="payment-buttons">
         <button
-          className={sale.saleType === "product" ? "pay active" : "pay"}
           type="button"
-          onClick={() =>
-            setSale({
-              ...sale,
-              saleType: "product",
-              serviceName: "",
-              serviceNote: "",
-            })
-          }
+          className={sale.saleType === "product" ? "pay active" : "pay"}
+          onClick={() => setSale({ ...sale, saleType: "product" })}
         >
           Product
         </button>
 
         <button
-          className={sale.saleType === "service" ? "pay active mpesa" : "pay"}
           type="button"
-          onClick={() =>
-            setSale({
-              ...sale,
-              saleType: "service",
-              category: "",
-              product: "",
-              quantity: "",
-            })
-          }
+          className={sale.saleType === "service" ? "pay active mpesa" : "pay"}
+          onClick={() => setSale({ ...sale, saleType: "service" })}
         >
           Service
         </button>
@@ -1651,37 +1562,37 @@ function App() {
         <>
           <select
             value={sale.category}
-            onChange={(e) =>
-              setSale({ ...sale, category: e.target.value, product: "" })
-            }
+            onChange={(e) => setSale({ ...sale, category: e.target.value, product: "" })}
           >
             <option value="">Select category</option>
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
               </option>
             ))}
           </select>
 
           <input
-            placeholder="Search product e.g hot 50, charger, glass..."
+            placeholder="Search product e.g charger, glass, earpods..."
             autoComplete="off"
-            value={saleProductSearch}
-            onChange={(e) => setSaleProductSearch(e.target.value)}
+            value={sale.product}
+            onChange={(e) => setSale({ ...sale, product: e.target.value })}
           />
 
           <select
-            value={sale.product}
-            disabled={!sale.category && !saleProductSearch}
-            onChange={(e) => setSale({ ...sale, product: e.target.value })}
+            value={products.some((p) => p.name === sale.product) ? sale.product : ""}
+            onChange={(e) =>
+              setSale({
+                ...sale,
+                product: e.target.value,
+                sellingPrice:
+                  products.find((p) => p.name === e.target.value)?.sellingPrice ||
+                  sale.sellingPrice,
+              })
+            }
           >
-            <option value="">
-              {sale.category || saleProductSearch
-                ? "Select product"
-                : "Choose category or search first"}
-            </option>
-
-            {filteredProducts.map((p) => (
+            <option value="">Choose product from list</option>
+            {saleProducts.map((p) => (
               <option key={p.name} value={p.name}>
                 {p.name} - Stock: {p.stock}
               </option>
@@ -1699,7 +1610,7 @@ function App() {
       ) : (
         <>
           <input
-            placeholder="Service done e.g screen protector fixing"
+            placeholder="Service done e.g screen replacement"
             autoComplete="off"
             value={sale.serviceName}
             onChange={(e) => setSale({ ...sale, serviceName: e.target.value })}
@@ -1716,34 +1627,41 @@ function App() {
 
       <input
         type="number"
-        inputMode="numeric"
-        placeholder={sale.saleType === "service" ? "Service charge" : "Selling price"}
+        inputMode="decimal"
+        placeholder={sale.saleType === "service" ? "Service charge" : "Selling price per item"}
         value={sale.sellingPrice}
         onChange={(e) => setSale({ ...sale, sellingPrice: e.target.value })}
       />
 
-      <select
+      <ChoiceGrid
+        label="Sold by"
+        helper="Tap the worker recording this sale."
         value={sale.soldBy}
-        onChange={(e) => setSale({ ...sale, soldBy: e.target.value })}
-      >
-        <option value="">Sold by</option>
-        {workers.map((worker) => (
-          <option key={worker.id} value={worker.name}>
-            {worker.name}
-          </option>
-        ))}
-      </select>
+        options={activeWorkers}
+        onChange={(name) => setSale({ ...sale, soldBy: name })}
+        emptyText="No active workers. Add workers in Admin Settings."
+      />
+
+      <ChoiceGrid
+        label="Shop branch"
+        helper="Tap the branch where this sale happened."
+        value={sale.branchName}
+        options={activeBranches}
+        onChange={(name) => setSale({ ...sale, branchName: name })}
+        emptyText="No active branches. Add branches in Admin Settings."
+        branch
+      />
 
       <div className="payment-buttons">
         {PAYMENT_METHODS.map((method) => (
           <button
             key={method}
+            type="button"
             className={
               sale.paymentMethod === method
                 ? `pay active ${method === "M-Pesa" ? "mpesa" : ""}`
                 : "pay"
             }
-            type="button"
             onClick={() => setSale({ ...sale, paymentMethod: method })}
           >
             {method}
@@ -1761,409 +1679,486 @@ function App() {
         {sales.length === 0 ? (
           <p className="empty">No sales recorded</p>
         ) : (
-          sales
-            .slice()
-            .reverse()
-            .map((s, index) => {
-              const realIndex = sales.length - 1 - index;
+          sales.slice(0, 30).map((s) => (
+            <div className="sale-row" key={s.id}>
+              <div className="item-icon">
+                {s.saleType === "service" ? "🛠️" : "🛒"}
+              </div>
 
-              return (
-                <div className="sale-row" key={s.id || realIndex}>
-                  <div className="item-icon">
-                    {s.saleType === "service" ? "🛠️" : "✅"}
-                  </div>
+              <div>
+                <h3>{saleName(s)}</h3>
+                <p>
+                  {s.saleType === "service" ? "Service" : `Qty ${s.quantity}`} •{" "}
+                  {s.soldBy} • {s.branchName}
+                </p>
+                <p>{niceDate(s.dateKey)} • {s.paymentMethod}</p>
+              </div>
 
-                  <div>
-                    <h3>{saleDisplayName(s)}</h3>
-                    <p>
-                      {s.saleType === "service" ? "Service" : `Qty ${s.quantity}`} •{" "}
-                      {s.soldBy} • {s.paymentMethod}
-                    </p>
-                  </div>
+              <strong>{money(s.total)}</strong>
 
-                  <div className="sale-actions">
-                    <strong>KSh {Number(s.total || 0).toLocaleString()}</strong>
-
-                    {isAdmin && (
-                      <button type="button" onClick={() => deleteSale(realIndex)}>
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })
+              {isAdmin && (
+                <button
+                  className="tiny-delete"
+                  type="button"
+                  onClick={() => deleteSale(s.id)}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          ))
         )}
       </div>
     </div>
   );
 
-  const Orders = () => (
-    <>
-      <div className="hero-card">
+  const Reports = () => (
+    <div className="panel">
+      <div className="panel-head">
         <div>
-          <p className="muted">Client Orders</p>
-          <h1>{pendingOrders.length}</h1>
-          <span className="green-text">Open orders waiting collection</span>
+          <h2>Reports</h2>
+          <p className="panel-subtitle">Daily sales, profit, branches, and workers.</p>
         </div>
+
+        <span className="report-count">{dailyReports.length} days</span>
       </div>
 
-      <div className="panel">
-        <h2>Add Client Order</h2>
+      <div className="daily-report-list">
+        {dailyReports.map((report) => {
+          const open = expandedReport === report.dateKey;
+          const selected = reportBranch[report.dateKey] || "all";
+          const selectedSales =
+            selected === "all"
+              ? report.sales
+              : report.sales.filter((s) => s.branchName === selected);
 
-        <div className="form-box">
-          <h3>Order for Later Collection</h3>
+          return (
+            <div className="daily-report-card" key={report.dateKey}>
+              <button
+                className="report-toggle"
+                type="button"
+                onClick={() => setExpandedReport(open ? "" : report.dateKey)}
+              >
+                <div>
+                  <h3>{report.day}</h3>
+                  <p>{report.label}</p>
+                </div>
 
-          <input
-            placeholder="Client name"
-            autoComplete="off"
-            value={newOrder.clientName}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, clientName: e.target.value })
-            }
-          />
+                <span>{report.count} sales</span>
+              </button>
 
-          <input
-            placeholder="Client phone number"
-            autoComplete="off"
-            value={newOrder.clientPhone}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, clientPhone: e.target.value })
-            }
-          />
+              <div className="daily-report-grid">
+                <div>
+                  <p>Total Sales</p>
+                  <strong>{money(report.totalSales)}</strong>
+                </div>
 
-          <div className="payment-buttons">
-            <button
-              className={newOrder.orderType === "product" ? "pay active" : "pay"}
-              type="button"
-              onClick={() => setNewOrder({ ...newOrder, orderType: "product" })}
-            >
-              Product
-            </button>
+                <div>
+                  <p>Profit</p>
+                  <strong>{money(report.totalProfit)}</strong>
+                </div>
 
-            <button
-              className={
-                newOrder.orderType === "service" ? "pay active mpesa" : "pay"
-              }
-              type="button"
-              onClick={() => setNewOrder({ ...newOrder, orderType: "service" })}
-            >
-              Service
-            </button>
-          </div>
+                <div>
+                  <p>Cash</p>
+                  <strong>{money(report.cash)}</strong>
+                </div>
 
-          <input
-            placeholder="Product/service ordered"
-            autoComplete="off"
-            value={newOrder.orderItem}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, orderItem: e.target.value })
-            }
-          />
-
-          <input
-            type="number"
-            inputMode="numeric"
-            placeholder="Total amount"
-            value={newOrder.totalAmount}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, totalAmount: e.target.value })
-            }
-          />
-
-          <input
-            type="number"
-            inputMode="numeric"
-            placeholder="Deposit paid"
-            value={newOrder.depositPaid}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, depositPaid: e.target.value })
-            }
-          />
-
-          <label className="field-label">Order date</label>
-          <input
-            type="date"
-            value={newOrder.orderDate}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, orderDate: e.target.value })
-            }
-          />
-
-          <label className="field-label">Collection date</label>
-          <input
-            type="date"
-            value={newOrder.collectionDate}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, collectionDate: e.target.value })
-            }
-          />
-
-          <select
-            value={newOrder.handledBy}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, handledBy: e.target.value })
-            }
-          >
-            <option value="">Handled by</option>
-            {workers.map((worker) => (
-              <option key={worker.id} value={worker.name}>
-                {worker.name}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={newOrder.status}
-            onChange={(e) =>
-              setNewOrder({ ...newOrder, status: e.target.value })
-            }
-          >
-            {ORDER_STATUSES.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-
-          <input
-            placeholder="Notes (optional)"
-            autoComplete="off"
-            value={newOrder.notes}
-            onChange={(e) => setNewOrder({ ...newOrder, notes: e.target.value })}
-          />
-
-          <button className="primary-btn" type="button" onClick={addOrder}>
-            Save Order
-          </button>
-        </div>
-      </div>
-
-      <div className="panel">
-        <h2>Order List</h2>
-
-        {orders.length === 0 ? (
-          <p className="empty">No client orders yet</p>
-        ) : (
-          orders.map((order) => (
-            <div className="order-card" key={order.id}>
-              <div className="order-top">
-                <h3>{order.clientName}</h3>
-                <span className={`order-status ${String(order.status).toLowerCase()}`}>
-                  {order.status}
-                </span>
+                <div>
+                  <p>M-Pesa</p>
+                  <strong>{money(report.mpesa)}</strong>
+                </div>
               </div>
 
-              <p>
-                <strong>{order.orderType === "service" ? "Service" : "Product"}:</strong>{" "}
-                {order.orderItem}
-              </p>
+              {open && (
+                <div className="report-details">
+                  <h3 className="section-title">Branches</h3>
 
-              <p>
-                <strong>Phone:</strong> {order.clientPhone || "Not added"}
-              </p>
+                  <div className="branch-tabs">
+                    <button
+                      type="button"
+                      className={selected === "all" ? "branch-tab active" : "branch-tab"}
+                      onClick={() =>
+                        setReportBranch({ ...reportBranch, [report.dateKey]: "all" })
+                      }
+                    >
+                      All branches
+                    </button>
 
-              <p>
-                <strong>Total:</strong> KSh{" "}
-                {Number(order.totalAmount || 0).toLocaleString()} •{" "}
-                <strong>Deposit:</strong> KSh{" "}
-                {Number(order.depositPaid || 0).toLocaleString()}
-              </p>
+                    {report.branchReports.map((b) => (
+                      <button
+                        key={b.branchName}
+                        type="button"
+                        className={selected === b.branchName ? "branch-tab active" : "branch-tab"}
+                        onClick={() =>
+                          setReportBranch({
+                            ...reportBranch,
+                            [report.dateKey]: b.branchName,
+                          })
+                        }
+                      >
+                        <strong>{b.branchName}</strong>
+                        <small>{money(b.totalSales)} sales • {money(b.totalProfit)} profit</small>
+                      </button>
+                    ))}
+                  </div>
 
-              <p>
-                <strong>Balance:</strong> KSh{" "}
-                {Number(order.balance || 0).toLocaleString()}
-              </p>
+                  <h3 className="section-title">Worker Summary</h3>
 
-              <p>
-                <strong>Collect:</strong> {order.collectionDate || "Not set"} •{" "}
-                <strong>By:</strong> {order.handledBy}
-              </p>
+                  {report.workerReports.length === 0 ? (
+                    <p className="empty small-empty">No worker sales this day</p>
+                  ) : (
+                    <div className="worker-summary-list">
+                      {report.workerReports.map((w) => (
+                        <div className="worker-summary-row" key={w.workerName}>
+                          <strong>{w.workerName}</strong>
+                          <span>{money(w.totalSales)} sales</span>
+                          <span>{money(w.totalProfit)} profit</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-              {order.notes && (
-                <p>
-                  <strong>Notes:</strong> {order.notes}
-                </p>
+                  <h3 className="section-title">
+                    {selected === "all" ? "All Sales" : selected}
+                  </h3>
+
+                  {selectedSales.length === 0 ? (
+                    <p className="empty small-empty">No sales in this branch/day</p>
+                  ) : (
+                    selectedSales.map((s) => (
+                      <div className="sale-row" key={s.id}>
+                        <div className="item-icon">
+                          {s.saleType === "service" ? "🛠️" : "📦"}
+                        </div>
+
+                        <div>
+                          <h3>{saleName(s)}</h3>
+                          <p>{s.branchName} • Sold by {s.soldBy}</p>
+                          <p>{s.paymentMethod} • Profit {money(s.profit)}</p>
+                        </div>
+
+                        <strong>{money(s.total)}</strong>
+                      </div>
+                    ))
+                  )}
+                </div>
               )}
-
-              <div className="order-actions">
-                {ORDER_STATUSES.map((status) => (
-                  <button
-                    key={status}
-                    type="button"
-                    onClick={() => updateOrderStatus(order.id, status)}
-                  >
-                    {status}
-                  </button>
-                ))}
-
-                {isAdmin && (
-                  <button
-                    className="danger-button"
-                    type="button"
-                    onClick={() => deleteOrder(order.id)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
             </div>
-          ))
-        )}
+          );
+        })}
       </div>
-    </>
+    </div>
   );
 
-  const Reports = () => (
-    <>
-      <div className="hero-card">
-        <div>
-          <p className="muted">Sales Overview</p>
-          <h1>KSh {totalSales.toLocaleString()}</h1>
-          <span className="green-text">
-            ▲ Profit: KSh {totalProfit.toLocaleString()}
-          </span>
-        </div>
+  const Orders = () => (
+    <div className="panel stable-form">
+      <h2>Client Orders</h2>
+
+      <div className="form-box">
+        <h3>Add Order</h3>
+
+        <input
+          placeholder="Client name"
+          value={newOrder.clientName}
+          onChange={(e) => setNewOrder({ ...newOrder, clientName: e.target.value })}
+        />
+
+        <input
+          placeholder="Client phone"
+          value={newOrder.clientPhone}
+          onChange={(e) => setNewOrder({ ...newOrder, clientPhone: e.target.value })}
+        />
+
+        <input
+          placeholder="Item or service ordered"
+          value={newOrder.orderItem}
+          onChange={(e) => setNewOrder({ ...newOrder, orderItem: e.target.value })}
+        />
+
+        <input
+          type="number"
+          placeholder="Total amount"
+          value={newOrder.totalAmount}
+          onChange={(e) => setNewOrder({ ...newOrder, totalAmount: e.target.value })}
+        />
+
+        <input
+          type="number"
+          placeholder="Deposit paid"
+          value={newOrder.depositPaid}
+          onChange={(e) => setNewOrder({ ...newOrder, depositPaid: e.target.value })}
+        />
+
+        <input
+          type="date"
+          value={newOrder.collectionDate}
+          onChange={(e) => setNewOrder({ ...newOrder, collectionDate: e.target.value })}
+        />
+
+        <select
+          value={newOrder.handledBy}
+          onChange={(e) => setNewOrder({ ...newOrder, handledBy: e.target.value })}
+        >
+          <option value="">Handled by</option>
+          {activeWorkers.map((w) => (
+            <option key={w.id || w.name} value={w.name}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+
+        <textarea
+          placeholder="Notes"
+          value={newOrder.notes}
+          onChange={(e) => setNewOrder({ ...newOrder, notes: e.target.value })}
+        />
+
+        <button className="primary-btn" type="button" onClick={addOrder}>
+          Save Order
+        </button>
       </div>
 
-      <div className="stats-grid two">
-        <div className="stat-card teal">
-          <p>Cash</p>
-          <h2>KSh {cashTotal.toLocaleString()}</h2>
-        </div>
+      {orders.length === 0 ? (
+        <p className="empty">No orders yet</p>
+      ) : (
+        orders.map((o) => (
+          <div className="order-card" key={o.id}>
+            <div className="order-top">
+              <h3>{o.orderItem}</h3>
+              <span className={`order-status ${String(o.status).toLowerCase()}`}>
+                {o.status}
+              </span>
+            </div>
 
-        <div className="stat-card pink">
-          <p>M-Pesa</p>
-          <h2>KSh {mpesaTotal.toLocaleString()}</h2>
-        </div>
-      </div>
+            <p><strong>Client:</strong> {o.clientName} • {o.clientPhone}</p>
+            <p>
+              <strong>Total:</strong> {money(o.totalAmount)} •{" "}
+              <strong>Deposit:</strong> {money(o.depositPaid)} •{" "}
+              <strong>Balance:</strong> {money(o.balance)}
+            </p>
+            <p><strong>Handled by:</strong> {o.handledBy}</p>
+            <p><strong>Collection:</strong> {o.collectionDate || "-"}</p>
 
-      <div className="panel">
-        <div className="panel-head">
-          <h2>Daily Report</h2>
-          <span className="report-count">{dailyReports.length} days</span>
-        </div>
+            {o.notes && <p><strong>Notes:</strong> {o.notes}</p>}
 
-        {dailyReports.length === 0 ? (
-          <p className="empty">No daily reports yet</p>
-        ) : (
-          <div className="daily-report-list">
-            {dailyReports.map((report) => (
-              <div className="daily-report-card" key={report.date}>
-                <div className="daily-report-top">
-                  <div>
-                    <h3>{report.day}</h3>
-                    <p>{report.date}</p>
-                  </div>
+            <div className="order-actions">
+              {ORDER_STATUSES.map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => updateOrderStatus(o.id, status)}
+                >
+                  {status}
+                </button>
+              ))}
 
-                  <span>{report.count} sales</span>
-                </div>
+              {isAdmin && (
+                <button
+                  className="danger-button"
+                  type="button"
+                  onClick={() => deleteOrder(o.id)}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
-                <div className="daily-report-grid">
-                  <div>
-                    <p>Total Sales</p>
-                    <strong>KSh {report.totalSales.toLocaleString()}</strong>
-                  </div>
+  const ManageWorkers = () => (
+    <div className="panel stable-form">
+      <button className="back-btn" type="button" onClick={() => goTo("more")}>
+        ← Back
+      </button>
 
-                  <div>
-                    <p>Profit</p>
-                    <strong>KSh {report.totalProfit.toLocaleString()}</strong>
-                  </div>
+      <h2>Manage Workers</h2>
 
-                  <div>
-                    <p>Cash</p>
-                    <strong>KSh {report.cash.toLocaleString()}</strong>
-                  </div>
+      {!isAdmin ? (
+        <p className="empty">Unlock admin mode first.</p>
+      ) : (
+        <>
+          <div className="form-box">
+            <h3>Add Worker</h3>
 
-                  <div>
-                    <p>M-Pesa</p>
-                    <strong>KSh {report.mpesa.toLocaleString()}</strong>
-                  </div>
-                </div>
+            <input
+              placeholder="Worker name"
+              value={newWorker}
+              onChange={(e) => setNewWorker(e.target.value)}
+            />
+
+            <button className="primary-btn" type="button" onClick={addWorker}>
+              Add Worker
+            </button>
+          </div>
+
+          <div className="management-list">
+            {workers.map((w) => (
+              <div className="management-card" key={w.id || w.name}>
+                {editingWorkerId === w.id ? (
+                  <>
+                    <input
+                      value={workerEditName}
+                      onChange={(e) => setWorkerEditName(e.target.value)}
+                    />
+
+                    <div className="mini-actions">
+                      <button type="button" onClick={() => saveWorker(w)}>Save</button>
+                      <button type="button" onClick={() => setEditingWorkerId("")}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <h3>{w.name}</h3>
+                      <p>{w.is_active === false ? "Inactive" : "Active"}</p>
+                    </div>
+
+                    <div className="mini-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingWorkerId(w.id);
+                          setWorkerEditName(w.name);
+                        }}
+                      >
+                        Edit
+                      </button>
+
+                      <button type="button" onClick={() => toggleWorker(w)}>
+                        {w.is_active === false ? "Reactivate" : "Deactivate"}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </>
+      )}
+    </div>
+  );
 
-      <div className="panel">
-        <button
-          className="collapse-head"
-          type="button"
-          onClick={() => setLowStockOpen(!lowStockOpen)}
-        >
-          <span>
-            <strong>Low Stock</strong>
-            <small>{lowStockProducts.length} products need attention</small>
-          </span>
+  const ManageBranches = () => (
+    <div className="panel stable-form">
+      <button className="back-btn" type="button" onClick={() => goTo("more")}>
+        ← Back
+      </button>
 
-          <b>{lowStockOpen ? "▲" : "▼"}</b>
-        </button>
+      <h2>Manage Branches</h2>
 
-        {lowStockOpen && (
-          <div className="collapse-body">
-            {lowStockProducts.length === 0 ? (
-              <p className="empty">No low stock products</p>
-            ) : (
-              lowStockProducts.map((p) => (
-                <button
-                  className="sale-row clickable-row"
-                  key={p.name}
-                  type="button"
-                  onClick={() => openProductDetail(p)}
-                >
-                  <div className="item-icon warning">⚠️</div>
+      {!isAdmin ? (
+        <p className="empty">Unlock admin mode first.</p>
+      ) : (
+        <>
+          <div className="form-box">
+            <h3>Add Branch</h3>
 
-                  <div>
-                    <h3>{p.name}</h3>
-                    <p>Current stock: {p.stock}</p>
-                  </div>
+            <input
+              type="number"
+              placeholder="Shop number"
+              value={newBranch.shop_number}
+              onChange={(e) =>
+                setNewBranch({ ...newBranch, shop_number: e.target.value })
+              }
+            />
 
-                  <strong>View</strong>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
+            <input
+              placeholder="Branch name"
+              value={newBranch.name}
+              onChange={(e) => setNewBranch({ ...newBranch, name: e.target.value })}
+            />
 
-      <div className="panel">
-        <div className="panel-head">
-          <h2>Client Orders</h2>
-
-          <button className="link-btn" type="button" onClick={() => goTo("orders")}>
-            Open
-          </button>
-        </div>
-
-        <div className="stats-grid two">
-          <div className="stat-card orange">
-            <p>Open Orders</p>
-            <h2>{pendingOrders.length}</h2>
+            <button className="primary-btn" type="button" onClick={addBranch}>
+              Add Branch
+            </button>
           </div>
 
-          <div className="stat-card teal">
-            <p>Total Orders</p>
-            <h2>{orders.length}</h2>
+          <div className="management-list">
+            {branches.map((b) => (
+              <div className="management-card" key={b.id || b.name}>
+                {editingBranchId === b.id ? (
+                  <>
+                    <input
+                      type="number"
+                      value={branchEdit.shop_number}
+                      onChange={(e) =>
+                        setBranchEdit({
+                          ...branchEdit,
+                          shop_number: e.target.value,
+                        })
+                      }
+                    />
+
+                    <input
+                      value={branchEdit.name}
+                      onChange={(e) =>
+                        setBranchEdit({ ...branchEdit, name: e.target.value })
+                      }
+                    />
+
+                    <div className="mini-actions">
+                      <button type="button" onClick={() => saveBranch(b)}>Save</button>
+                      <button type="button" onClick={() => setEditingBranchId("")}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <h3>
+                        {b.shop_number ? `Shop ${b.shop_number}: ` : ""}
+                        {b.name}
+                      </h3>
+                      <p>{b.is_active === false ? "Inactive" : "Active"}</p>
+                    </div>
+
+                    <div className="mini-actions">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingBranchId(b.id);
+                          setBranchEdit({
+                            shop_number: b.shop_number || "",
+                            name: b.name,
+                          });
+                        }}
+                      >
+                        Edit
+                      </button>
+
+                      <button type="button" onClick={() => toggleBranch(b)}>
+                        {b.is_active === false ? "Reactivate" : "Deactivate"}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
           </div>
-        </div>
-      </div>
-    </>
+        </>
+      )}
+    </div>
   );
 
   const More = () => (
-    <div className="panel">
+    <div className="panel stable-form">
       <h2>More</h2>
 
       <div className="form-box">
-        <h3>{isAdmin ? "Admin Mode Active" : "Admin Login"}</h3>
+        <h3>{isAdmin ? "Admin Mode Active" : "Unlock Admin"}</h3>
 
-        {!isAdmin ? (
+        {isAdmin ? (
+          <button className="secondary-btn" type="button" onClick={lockAdmin}>
+            Lock Admin
+          </button>
+        ) : (
           <>
             <input
               type="password"
+              inputMode="numeric"
               placeholder="Enter admin PIN"
-              autoComplete="off"
               value={pinInput}
               onChange={(e) => setPinInput(e.target.value)}
             />
@@ -2172,65 +2167,35 @@ function App() {
               Unlock Admin
             </button>
           </>
-        ) : (
-          <button className="secondary-btn" type="button" onClick={lockAdmin}>
-            Lock Admin
-          </button>
         )}
       </div>
 
+      <button className="more-card" type="button" onClick={() => goTo("workersAdmin")}>
+        👥 Manage Workers
+      </button>
+
+      <button className="more-card" type="button" onClick={() => goTo("branchesAdmin")}>
+        🏪 Manage Branches
+      </button>
+
+      <button className="more-card" type="button" onClick={() => goTo("orders")}>
+        🧾 Client Orders
+      </button>
+
+      <button className="more-card" type="button" onClick={testConnection}>
+        🔌 Test Supabase
+      </button>
+
       {isAdmin && (
         <div className="form-box">
-          <h3>Worker Management</h3>
+          <h3>Backup Data</h3>
 
-          <input
-            placeholder="Worker name"
-            autoComplete="off"
-            value={newWorker}
-            onChange={(e) => setNewWorker(e.target.value)}
-          />
-
-          <button className="primary-btn" type="button" onClick={addWorker}>
-            Add Worker
-          </button>
-
-          <br />
-          <br />
-
-          {workers.length === 0 ? (
-            <p className="empty">No workers added yet</p>
-          ) : (
-            workers.map((worker) => (
-              <div className="sale-row" key={worker.id}>
-                <div className="item-icon">👤</div>
-
-                <div>
-                  <h3>{worker.name}</h3>
-                  <p>Worker</p>
-                </div>
-
-                <div className="sale-actions">
-                  <button
-                    type="button"
-                    onClick={() => deleteWorker(worker.id, worker.name)}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {isAdmin && (
-        <>
           <button
             className="primary-btn"
             type="button"
-            onClick={testSupabaseConnection}
+            onClick={() => downloadCSV("yusuf_products_backup.csv", products)}
           >
-            Test Supabase Connection
+            Export Products
           </button>
 
           <br />
@@ -2239,9 +2204,9 @@ function App() {
           <button
             className="secondary-btn"
             type="button"
-            onClick={syncProductsToSupabase}
+            onClick={() => downloadCSV("yusuf_sales_backup.csv", sales)}
           >
-            Sync Products to Supabase
+            Export Sales
           </button>
 
           <br />
@@ -2250,9 +2215,9 @@ function App() {
           <button
             className="secondary-btn"
             type="button"
-            onClick={loadProductsFromSupabase}
+            onClick={() => downloadCSV("yusuf_orders_backup.csv", orders)}
           >
-            Load Products from Supabase
+            Export Orders
           </button>
 
           <br />
@@ -2261,9 +2226,9 @@ function App() {
           <button
             className="secondary-btn"
             type="button"
-            onClick={loadSalesFromSupabase}
+            onClick={() => downloadCSV("yusuf_workers_backup.csv", workers)}
           >
-            Load Sales from Supabase
+            Export Workers
           </button>
 
           <br />
@@ -2272,85 +2237,81 @@ function App() {
           <button
             className="secondary-btn"
             type="button"
-            onClick={loadDataFromSupabase}
+            onClick={() => downloadCSV("yusuf_branches_backup.csv", branches)}
           >
-            Refresh All Data
+            Export Branches
           </button>
-
-          <br />
-          <br />
-        </>
+        </div>
       )}
-
-      <button className="more-card menu-card" type="button" onClick={() => goTo("orders")}>
-        🧾 Client Orders — open page
-      </button>
-
-      <div className="more-card">📦 Real-time Stock — Supabase active</div>
-      <div className="more-card">
-        👥 Multi-worker Access — {isAdmin ? "Admin" : "Worker"} mode
-      </div>
-      <div className="more-card">🛠️ Product & Service Sales — active</div>
-      <div className="more-card">🔐 Admin PIN — active</div>
     </div>
   );
 
-  const pageTitle = () => {
-    if (activeTab === "dashboard") return SHOP_NAME;
-    if (activeTab === "products") return "Products";
-    if (activeTab === "productDetail") return "Product Details";
-    if (activeTab === "sales") return "New Sale";
-    if (activeTab === "orders") return "Client Orders";
-    if (activeTab === "reports") return "Reports";
-    if (activeTab === "more") return "More";
-    return SHOP_NAME;
+  const renderScreen = () => {
+    switch (activeTab) {
+      case "dashboard":
+        return <Dashboard />;
+      case "products":
+        return <Products />;
+      case "productDetail":
+        return <ProductDetail />;
+      case "sales":
+        return <Sales />;
+      case "reports":
+        return <Reports />;
+      case "orders":
+        return <Orders />;
+      case "workersAdmin":
+        return <ManageWorkers />;
+      case "branchesAdmin":
+        return <ManageBranches />;
+      case "more":
+        return <More />;
+      default:
+        return <Dashboard />;
+    }
   };
 
   return (
     <div className="phone-shell">
-      {toast && <div className={`toast ${toast.type}`}>{toast.message}</div>}
+      {toast && (
+        <div className={toast.type === "error" ? "toast error" : "toast"}>
+          {toast.message}
+        </div>
+      )}
 
-      {SideMenu()}
-
-      <div className="top-bar">
+      <header className="top-bar">
         <button className="menu-btn" type="button" onClick={() => setMenuOpen(true)}>
           ☰
         </button>
 
-        <h2>{pageTitle()}</h2>
+        <h2>{SHOP_NAME}</h2>
 
-        <span className="bell">🔔</span>
-      </div>
+        <button className="bell" type="button" onClick={() => goTo("reports")}>
+          🔔
+        </button>
+      </header>
 
-      <main className="screen">
-        {activeTab === "dashboard" && Dashboard()}
-        {activeTab === "products" && Products()}
-        {activeTab === "productDetail" && ProductDetail()}
-        {activeTab === "sales" && Sales()}
-        {activeTab === "orders" && Orders()}
-        {activeTab === "reports" && Reports()}
-        {activeTab === "more" && More()}
-      </main>
+      <SideMenu />
+
+      <main className="screen">{renderScreen()}</main>
 
       <nav className="bottom-nav">
         <button
-          className={activeTab === "dashboard" ? "active" : ""}
           type="button"
+          className={activeTab === "dashboard" ? "active" : ""}
           onClick={() => goTo("dashboard")}
         >
-          ⌂<span>Dashboard</span>
+          🏠
+          <span>Dashboard</span>
         </button>
 
         <button
-          className={
-            activeTab === "products" || activeTab === "productDetail"
-              ? "active"
-              : ""
-          }
           type="button"
+          className={activeTab === "products" ? "active" : ""}
           onClick={() => goTo("products")}
         >
-          ▣<span>Products</span>
+          ▣
+          <span>Products</span>
         </button>
 
         <button className="big-add" type="button" onClick={() => goTo("sales")}>
@@ -2358,19 +2319,21 @@ function App() {
         </button>
 
         <button
-          className={activeTab === "reports" ? "active" : ""}
           type="button"
+          className={activeTab === "reports" ? "active" : ""}
           onClick={() => goTo("reports")}
         >
-          ◴<span>Reports</span>
+          ◴
+          <span>Reports</span>
         </button>
 
         <button
-          className={activeTab === "more" || activeTab === "orders" ? "active" : ""}
           type="button"
+          className={activeTab === "more" ? "active" : ""}
           onClick={() => goTo("more")}
         >
-          ☰<span>More</span>
+          ☰
+          <span>More</span>
         </button>
       </nav>
     </div>
